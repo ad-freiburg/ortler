@@ -1,0 +1,33 @@
+# Environment and credentials
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Cache
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+ortler-cache/
+cache/
+
+# OS
+.DS_Store
