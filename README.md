@@ -142,7 +142,7 @@ can be used as additional placeholders in the email body, where, for example,
 `{{titles}}` will be replaced by the content of the `?titles` variable.
 ```
 # Query: https://qlever.dev/your-backend/QUERY_HASH
-To: (will be replaced by query results)
+To: (will be replaced by profile IDs from query result)
 Subject: Your submissions
 
 Dear {{name}},
