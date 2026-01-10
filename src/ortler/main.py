@@ -2,7 +2,7 @@
 # PYTHON_ARGCOMPLETE_OK
 
 """
-Command-line tool for using OpenReview for SIGIR 2026.
+A command-line tool for managing OpenReview venues.
 
 Author: Hannah Bast <bast@cs.uni-freiburg.de>
 """
@@ -46,7 +46,9 @@ def discover_commands() -> list[Command]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="OpenReview CLI tool for SIGIR 2026")
+    parser = argparse.ArgumentParser(
+        description="A command-line tool for managing OpenReview venues"
+    )
 
     # Global command-independent arguments.
     parser.add_argument(

@@ -1,7 +1,7 @@
 # OpenReview CLI Tool (ortler)
 
 ## Project Structure
-- CLI tool for OpenReview API with commands: `update`, `dump`, `profile`, `submissions`, `recruitment`, `mail`
+- A command-line tool for OpenReview API with commands: `update`, `dump`, `profile`, `submissions`, `recruitment`, `mail`
 - Cache-based workflow: `update` syncs with OpenReview, `dump` outputs cached data as RDF
 - Uses singleton client pattern for API authentication (both v1 and v2 APIs)
 

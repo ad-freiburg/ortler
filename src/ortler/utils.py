@@ -17,14 +17,13 @@ from reportlab.pdfgen import canvas
 from .client import get_client
 
 
-
 def format_author_name(author_id: str) -> str:
     """
     Convert author ID to proper name format.
 
-    Example: ~Hannah_Bast1 -> Hannah Bast
-    >>> format_author_name("~Hannah_Bast1")
-    'Hannah Bast'
+    Example: ~User_Name1 -> User Name
+    >>> format_author_name("~User_Name1")
+    'User Name'
     """
     if author_id.startswith("~"):
         name = author_id[1:]
@@ -39,7 +38,7 @@ def generate_random_paper(
     model: str, prompt: str, author_ids: list[str], api_key: str | None = None
 ) -> tuple[str, str, list[str]]:
     """
-    Generate a random SIGIR paper title, abstract, and author names using OpenAI API.
+    Generate a random paper title, abstract, and author names using OpenAI API.
 
     Returns:
         tuple: (title, abstract, authors)
@@ -55,7 +54,7 @@ def generate_random_paper(
 
         # Add author IDs to the prompt
         author_list = ", ".join(author_ids)
-        full_prompt = f"{prompt}\n\nAuthor IDs: {author_list}\n\nConvert author IDs (like ~Hannah_Bast1) to proper names (like Hannah Bast) in Firstname Lastname format."
+        full_prompt = f"{prompt}\n\nAuthor IDs: {author_list}\n\nConvert author IDs (like ~User_Name1) to proper names (like User Name) in Firstname Lastname format."
 
         # Define JSON schema
         json_schema: dict[str, Any] = {
@@ -90,7 +89,7 @@ def generate_random_paper(
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert in Information Retrieval and SIGIR conference papers.",
+                        "content": "You are an expert in academic research and conference paper writing.",
                     },
                     {"role": "user", "content": full_prompt},
                 ],
@@ -103,7 +102,7 @@ def generate_random_paper(
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert in Information Retrieval and SIGIR conference papers.",
+                        "content": "You are an expert in academic research and conference paper writing.",
                     },
                     {"role": "user", "content": full_prompt},
                 ],
@@ -193,9 +192,7 @@ def get_random_profiles(
     return names, profile_ids
 
 
-def get_random_authors(
-    num_authors: int
-) -> tuple[list[str], list[str]]:
+def get_random_authors(num_authors: int) -> tuple[list[str], list[str]]:
     """
     Get random authors by searching with random two-letter strings.
     """

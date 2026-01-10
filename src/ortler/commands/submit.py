@@ -79,16 +79,8 @@ class SubmitCommand(Command):
         parser.add_argument(
             "--paper-prompt",
             default=(
-                "Generate a title, abstract, and author names for a creative and diverse research paper that could be submitted to "
-                "SIGIR 2026 (International ACM SIGIR Conference on Research and Development in Information Retrieval). "
-                "Be creative and explore diverse topics within information retrieval. Consider various research areas such as: "
-                "classical IR models, neural ranking, query processing, semantic search, cross-lingual retrieval, "
-                "multilingual IR, question answering, knowledge graphs for search, information extraction, "
-                "document understanding, query expansion, relevance feedback, evaluation metrics, user studies, "
-                "personalization, federated search, enterprise search, web search, social media search, "
-                "voice search, mobile search, conversational agents, interactive IR, search result diversification, "
-                "domain-specific retrieval, legal IR, medical IR, scientific IR, patent search, code search, "
-                "image search, video search, music IR, or any other IR-related topic. "
+                "Generate a title, abstract, and author names for a creative and diverse research paper. "
+                "Be creative and explore diverse topics within computer science. "
                 "Vary your approach and be original - avoid repetitive patterns.\n\n"
                 "Respond with JSON in this exact format:\n"
                 "{\n"
