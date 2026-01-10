@@ -1,6 +1,9 @@
 # ortler
 
-A CLI tool for managing OpenReview venues. It provides commands for syncing venue data to a local cache, managing committee recruitment, tracking submissions, and sending emails via the OpenReview API.
+A command-line tool for managing OpenReview venues. It provides commands for syncing
+venue data to a local cache, managing committee recruitment, tracking
+submissions, and sending emails via the OpenReview API. It's called `ortler`
+after a beautiful mountain in the Alps, and or = OpenReview.
 
 ## Quickstart
 

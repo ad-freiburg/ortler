@@ -1,4 +1,4 @@
-# OpenReview CLI Tool (ortler) for SIGIR 2026
+# OpenReview CLI Tool (ortler)
 
 ## Project Structure
 - CLI tool for OpenReview API with commands: `update`, `dump`, `profile`, `submissions`, `recruitment`, `mail`
@@ -31,14 +31,13 @@ Set in `.env` file:
 OPENREVIEW_API_URL=https://api2.openreview.net
 OPENREVIEW_USERNAME=your_email
 OPENREVIEW_PASSWORD=your_password
-OPENREVIEW_VENUE_ID=ACM.org/SIGIR/2026/Conference
+OPENREVIEW_VENUE_ID=Your/Venue/ID
 OPENREVIEW_IMPERSONATE_GROUP=venue_organizer_group
 RDF_DEFAULT_PREFIX=http://openreview.net/
-CACHE_DIR=ortler-cache
-MAIL_FROM=Name <sender@openreview.net>
-MAIL_FROM_DIRECT=Name <your_email>
+CACHE_DIR=cache
+MAIL_FROM=Your Name <your-venue@openreview.net>
 QLEVER_LINK_API=https://qlever.dev/api/link/
-QLEVER_QUERY_API=https://qlever.dev/api/sigir-2026
+QLEVER_QUERY_API=https://qlever.dev/api/your-backend
 QLEVER_QUERY_API_USERNAME=username
 QLEVER_QUERY_API_PASSWORD=password
 ```
@@ -64,7 +63,7 @@ QLEVER_QUERY_API_PASSWORD=password
 - `recipients_from_query(hash_or_url)`: Get profile IDs from query results
 
 ## Code Style
-Each .py file should be formatted according to `/home/bast/.local/bin/ruff format FILE && /home/bast/.local/bin/ruff check --fix FILE`
+Each .py file should be formatted according to `ruff format FILE && ruff check --fix FILE`
 
 ## Logging
 Use `from .log import log` and then `log.info()`, `log.warning()`, `log.error()` for all output messages. Do not use `print()` for logging.
@@ -72,7 +71,7 @@ Use `from .log import log` and then `log.info()`, `log.warning()`, `log.error()`
 ## Cache Structure
 The cache directory (set via `CACHE_DIR` or `--cache-dir`) contains:
 - `metadata.json`: Last update timestamp
-- `profiles/`: Profile JSON files (by canonical ID, e.g., `Hannah_Bast1.json`)
+- `profiles/`: Profile JSON files (by canonical ID, e.g., `User_Name1.json`)
 - `profiles/_id_mapping.json`: Email → canonical profile ID mapping
 - `submissions/`: Submission JSON files
 - `groups/`: Group membership (Reviewers.json, Area_Chairs.json, etc.)
@@ -130,7 +129,7 @@ Roles: `pc` (Reviewers), `spc` (Area Chairs), `ac` (Senior Area Chairs)
 **Note:** `--set-reduced-load` only works for users who responded to recruitment via OpenReview. Users added directly to groups have no recruitment note and cannot have reduced_load set via API.
 
 ## Other Commands
-- `ortler profile ~Hannah_Bast1 --as-rdf`: Get single profile with RDF output
+- `ortler profile ~User_Name1 --as-rdf`: Get single profile with RDF output
 - `ortler mail message.txt --dry-run`: Preview email without sending
 - `ortler mail message.txt --recipients-from-sparql-query HASH`: Send to SPARQL results
 

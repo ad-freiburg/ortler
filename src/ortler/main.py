@@ -76,8 +76,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--cache-dir",
-        default=os.environ.get("CACHE_DIR", "ortler-cache"),
-        help="Cache directory (default: $CACHE_DIR or 'ortler-cache')",
+        default=os.environ.get("CACHE_DIR", "cache"),
+        help="Cache directory (default: $CACHE_DIR or 'cache')",
     )
 
     # Add subparser for each command (the arguments are in the respective

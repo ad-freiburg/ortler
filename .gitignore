@@ -26,7 +26,6 @@ venv/
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
-ortler-cache/
 cache/
 
 # OS
