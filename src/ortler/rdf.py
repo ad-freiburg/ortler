@@ -117,16 +117,34 @@ class Rdf:
             return f"<{self.prefixes['paper']}{paper_id}>"
         return f"paper:{paper_id}"
 
+    def _is_valid_prefixed_name(self, local_name: str) -> bool:
+        """
+        Check if a string can be used as the local part of a Turtle prefixed name.
+        Valid: letters, numbers, underscores, hyphens, dots (not at end).
+        Invalid: @, spaces, trailing dots.
+        """
+        if not local_name:
+            return False
+        if local_name.endswith("."):
+            return False
+        # Check for characters that are not allowed in prefixed names
+        for char in local_name:
+            if char in "@ ":
+                return False
+        return True
+
     def personIri(self, person_id: str) -> str:
         """
         Create a person IRI from a person ID.
+        Uses prefixed name if valid, otherwise full IRI.
         """
-        # Remove special characters and create a clean ID
-        # Replace ~ with empty string, spaces with underscores
-        clean_id = person_id.replace("~", "").replace(" ", "_")
-        # For emails, replace @ and . with underscores
-        clean_id = clean_id.replace("@", "_at_").replace(".", "_")
-        return f"person:{clean_id}"
+        # Remove ~ prefix
+        local_name = person_id.lstrip("~")
+
+        if self._is_valid_prefixed_name(local_name):
+            return f"person:{local_name}"
+        else:
+            return f"<{self.prefixes['person']}{local_name}>"
 
     def literal(self, value: str) -> str:
         """
@@ -168,16 +186,12 @@ class Rdf:
 
         # If we got a value, return it as a prefixed IRI
         if current and isinstance(current, str):
-            # Use special handling for person IRIs
             if prefix == "person":
-                # Remove special characters and create a clean ID
-                clean_id = current.replace("~", "").replace(" ", "_")
-                # For emails, replace @ and . with underscores
-                clean_id = clean_id.replace("@", "_at_").replace(".", "_")
+                return self.personIri(current)
             else:
                 # Basic cleaning for other prefixes
                 clean_id = current.replace(" ", "_")
-            return f"{prefix}:{clean_id}"
+                return f"{prefix}:{clean_id}"
         elif current is not None and not isinstance(current, (dict, list)):
             # Handle other types (numbers, booleans)
             return f"{prefix}:{str(current)}"

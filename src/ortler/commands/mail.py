@@ -5,12 +5,15 @@ Mail command for sending emails via OpenReview.
 import os
 import re
 from argparse import ArgumentParser, Namespace
+from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 
 from ..command import Command
 from ..client import get_client
 from ..log import log
 from ..qlever import query_results_by_recipient
+from ..utils import format_author_name
 
 
 class MailCommand(Command):
@@ -54,7 +57,8 @@ class MailCommand(Command):
 
     def _get_name(self, profile) -> str:
         """
-        Get the name from a profile: first name if available, otherwise full name.
+        Get the name from a profile: first name if available, otherwise full name,
+        otherwise extract from profile ID.
         """
         content = profile.content if hasattr(profile, "content") else {}
         names = content.get("names", [])
@@ -65,6 +69,9 @@ class MailCommand(Command):
             fullname = names[0].get("fullname", "")
             if fullname:
                 return fullname
+        # Fallback: extract name from profile ID (e.g., ~K__J__Amala1 -> K J Amala)
+        if hasattr(profile, "id") and profile.id:
+            return format_author_name(profile.id)
         return ""
 
     def _parse_from_header(self, from_header: str) -> dict:
@@ -79,6 +86,77 @@ class MailCommand(Command):
                 "fromEmail": match.group(2).strip(),
             }
         return {"fromName": "", "fromEmail": from_header.strip()}
+
+    def _personalize_body(
+        self,
+        body: str,
+        placeholders: set[str],
+        recipient: str,
+        query_data_by_recipient: dict[str, dict],
+        client,
+    ) -> str:
+        """
+        Substitute placeholders in the body for a specific recipient.
+        """
+        personalized_body = body
+
+        # Substitute {{name}} from profile if present
+        if "name" in placeholders:
+            try:
+                profile = client.get_profile(recipient)
+                name = self._get_name(profile)
+            except Exception:
+                # Profile not found - extract name from recipient ID
+                name = format_author_name(recipient)
+            personalized_body = personalized_body.replace(
+                "{{name}}", name if name else ""
+            )
+
+        # Substitute query variables if available
+        if recipient in query_data_by_recipient:
+            row_data = query_data_by_recipient[recipient]
+            for var, value in row_data.items():
+                personalized_body = personalized_body.replace(
+                    "{{" + var + "}}", value if value else ""
+                )
+
+        return personalized_body
+
+    def _generate_mbox(
+        self,
+        recipients: list[str],
+        headers: dict,
+        body: str,
+        placeholders: set[str],
+        query_data_by_recipient: dict[str, dict],
+        client,
+    ) -> str:
+        """
+        Generate mbox content for all emails that will be sent.
+        """
+        mbox_lines = []
+        timestamp = datetime.now().strftime("%a %b %d %H:%M:%S %Y")
+        from_email = self._parse_from_header(headers["From"])["fromEmail"]
+
+        for recipient in recipients:
+            # Personalize body if needed
+            if placeholders:
+                email_body = self._personalize_body(
+                    body, placeholders, recipient, query_data_by_recipient, client
+                )
+            else:
+                email_body = body
+
+            # MBOX format: "From sender date" line
+            mbox_lines.append(f"From {from_email} {timestamp}")
+            mbox_lines.append(f"From: {headers['From']}")
+            mbox_lines.append(f"To: {recipient}")
+            mbox_lines.append(f"Subject: {headers['Subject']}")
+            mbox_lines.append("")  # Blank line between headers and body
+            mbox_lines.append(email_body + self.separator)
+            mbox_lines.append("")  # Blank line between messages
+
+        return "\n".join(mbox_lines)
 
     def execute(self, args: Namespace) -> None:
         """
@@ -231,11 +309,26 @@ class MailCommand(Command):
             )
             return
 
+        # Generate mbox file with all emails (templates resolved)
+        mbox_content = self._generate_mbox(
+            original_recipients,
+            headers,
+            body,
+            placeholders,
+            query_data_by_recipient,
+            client,
+        )
+        mail_path = Path(args.file)
+        mbox_path = mail_path.with_suffix(".mbox")
+        with open(mbox_path, "w") as f:
+            f.write(mbox_content)
+
         # Confirm before sending
         try:
             input(
+                f"\nPreview with resolved templates written to {mbox_path}"
                 f"\n\033[94mPress CTRL+C to abort, RETURN to send email to "
-                f"{num_recipients}: {to_display} \033[0m"
+                f"{num_recipients}: {to_display}\033[0m "
             )
         except KeyboardInterrupt:
             log.warning("\nAborted")
@@ -253,27 +346,13 @@ class MailCommand(Command):
             for i, original_recipient in enumerate(original_recipients):
                 send_to = recipients[i]
 
-                # Start with original body
-                personalized_body = body
-
-                # Substitute {{name}} from profile if present
-                if "name" in placeholders:
-                    try:
-                        profile = client.get_profile(original_recipient)
-                        name = self._get_name(profile)
-                    except Exception:
-                        name = ""
-                    personalized_body = personalized_body.replace(
-                        "{{name}}", name if name else ""
-                    )
-
-                # Substitute query variables if available
-                if original_recipient in query_data_by_recipient:
-                    row_data = query_data_by_recipient[original_recipient]
-                    for var, value in row_data.items():
-                        personalized_body = personalized_body.replace(
-                            "{{" + var + "}}", value if value else ""
-                        )
+                personalized_body = self._personalize_body(
+                    body,
+                    placeholders,
+                    original_recipient,
+                    query_data_by_recipient,
+                    client,
+                )
 
                 try:
                     client.post_message(
