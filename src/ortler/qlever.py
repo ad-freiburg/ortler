@@ -8,10 +8,12 @@ from typing import Any
 import requests
 
 
-def get_sparql_query(short_hash: str) -> str:
+def get_sparql_query(hash_or_url: str) -> str:
     """
-    Get a SPARQL query from the QLever link API using a short hash (e.g., 'PZGwbS').
+    Get a SPARQL query from the QLever link API using a short-hash URL or just
+    the short hash (e.g., https://qlever.dev/sigir-2026/5Z9yCv or just 5Z9yCv).
     """
+    short_hash = hash_or_url.rstrip("/").split("/")[-1]
     link_api = os.environ.get("QLEVER_LINK_API", "https://qlever.dev/api/link/")
     url = f"{link_api}{short_hash}/"
 
@@ -104,8 +106,7 @@ def query_results_by_recipient(hash_or_url: str) -> tuple[list[str], dict[str, d
         - data_by_recipient: dict mapping each recipient to {variable: value, ...}
           for all other variables in that row
     """
-    short_hash = hash_or_url.rstrip("/").split("/")[-1]
-    query = get_sparql_query(short_hash)
+    query = get_sparql_query(hash_or_url)
     result = issue_sparql_query(query)
 
     bindings = result.get("results", {}).get("bindings", [])

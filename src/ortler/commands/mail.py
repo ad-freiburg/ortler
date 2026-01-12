@@ -401,9 +401,19 @@ class MailCommand(Command):
             message_log_url = (
                 f"https://openreview.net/messages?subject={subject_encoded}"
             )
+
+            # Build query link if a SPARQL query was used
+            query_link_line = ""
+            if query_hash_or_url:
+                query_link_line = (
+                    f"\n\n[Click here to see the SPARQL query that was used to "
+                    f"compute the list of recipients]({query_hash_or_url})"
+                )
+
             fyi_body = (
                 f"FYI, the mail below was sent to {num_recipients}: "
-                f"{headers.get('To')}\n\n"
+                f"{headers.get('To')}"
+                f"{query_link_line}\n\n"
                 f"[Click here to see all messages with that subject in the OpenReview message log]({message_log_url})"
                 f"{self.separator}\n\n"
                 f"{body}"
