@@ -20,7 +20,7 @@ from . import commands
 from .command import Command
 
 # Load environment variables from .env file if it exists
-load_dotenv()
+load_dotenv(interpolate=False)
 
 
 def discover_commands() -> list[Command]:
