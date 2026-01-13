@@ -7,7 +7,6 @@ from .invitations import InvitationsCommand
 from .users import UsersCommand
 from .submit import SubmitCommand
 from .recruitment import RecruitmentCommand
-from .profile import ProfileCommand
 
 __all__ = [
     "SubmissionsCommand",
@@ -15,5 +14,4 @@ __all__ = [
     "UsersCommand",
     "SubmitCommand",
     "RecruitmentCommand",
-    "ProfileCommand",
 ]
