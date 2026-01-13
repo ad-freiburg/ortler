@@ -277,8 +277,8 @@ class ProfileWithPapers:
                 add_papers(
                     client.get_all_notes(content={"authorids": canonical_profile_id})
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.error(f"Error fetching publications from API v2: {e}")
 
             # Query API v1 (legacy API, contains most DBLP/ORCID imports)
             try:
@@ -287,8 +287,8 @@ class ProfileWithPapers:
                         content={"authorids": canonical_profile_id}
                     )
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.error(f"Error fetching publications from API v1: {e}")
 
             # Process papers
             self.papers = []

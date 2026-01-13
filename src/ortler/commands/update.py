@@ -41,6 +41,13 @@ class UpdateCommand(Command):
             help="Force re-fetch: submissions, profiles (metadata only), "
             "profiles-with-publications, all (submissions + profiles-with-publications)",
         )
+        parser.add_argument(
+            "--profiles",
+            nargs="+",
+            metavar="PROFILE",
+            help="Restrict profile update to specific profile(s); "
+            "implies --recache profiles-with-publications if no --recache given",
+        )
 
     def _get_metadata_path(self, cache_dir: str) -> Path:
         """Get path to cache metadata file."""
@@ -399,9 +406,11 @@ class UpdateCommand(Command):
         last_update = metadata.get("last_update_timestamp", 0)
 
         # Handle --recache options (not a hierarchy, except profiles < profiles-with-publications)
-        # Note: DBLP scan only runs during incremental updates, not when recaching
+        # --profiles without --recache implies --recache profiles-with-publications
         recache = args.recache or ""
-        recache_submissions = recache in ("submissions", "all")
+        if args.profiles and not recache:
+            recache = "profiles-with-publications"
+        recache_submissions = recache in ("submissions", "all") and not args.profiles
         recache_profiles = recache in ("profiles", "profiles-with-publications", "all")
         recache_publications = recache in ("profiles-with-publications", "all")
 
@@ -435,6 +444,11 @@ class UpdateCommand(Command):
 
         # Add new authors to tracked profiles
         tracked_profiles.update(new_author_ids)
+
+        # Apply --profiles filter
+        if args.profiles:
+            tracked_profiles = set(args.profiles)
+            log.info(f"Filtered to {len(tracked_profiles)} specified profile(s)")
 
         # Step 3: Check for new DBLP publications (only for incremental updates)
         log.info("Checking for new DBLP publications...")
