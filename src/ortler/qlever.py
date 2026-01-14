@@ -29,12 +29,11 @@ def issue_sparql_query(query: str) -> dict[str, Any]:
     Execute a SPARQL query against the QLever query API (with Basic auth).
     """
     query_api = os.environ.get("QLEVER_QUERY_API", "")
+    if not query_api:
+        raise ValueError("QLEVER_QUERY_API environment variable is not set")
+
     username = os.environ.get("QLEVER_QUERY_API_USERNAME", "")
     password = os.environ.get("QLEVER_QUERY_API_PASSWORD", "")
-
-    # Add http:// if no protocol specified
-    if query_api and not query_api.startswith(("http://", "https://")):
-        query_api = f"http://{query_api}"
 
     auth = (username, password) if username and password else None
 

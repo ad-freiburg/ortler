@@ -51,8 +51,8 @@ class MailCommand(Command):
         )
         parser.add_argument(
             "--recipients-from-sparql-query",
-            metavar="HASH",
-            help="Replace To: recipients with results from a SPARQL query (short hash)",
+            metavar="URL_OR_HASH",
+            help="Replace To: recipients with results from a SPARQL query (URL or short hash)",
         )
 
     def _get_name(self, profile) -> str:
