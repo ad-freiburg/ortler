@@ -7,21 +7,21 @@ A command-line tool for managing OpenReview venues.
 Author: Hannah Bast <bast@cs.uni-freiburg.de>
 """
 
+# Load environment variables FIRST, before any other imports
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=Path.cwd() / ".env", interpolate=False)
+
 import argparse
 import importlib
 import importlib.metadata
 import os
 import pkgutil
-from pathlib import Path
 
 import argcomplete
-from dotenv import load_dotenv
 
 from . import commands
 from .command import Command
-
-# Load environment variables from .env file if it exists
-load_dotenv(interpolate=False)
 
 
 def discover_commands() -> list[Command]:
