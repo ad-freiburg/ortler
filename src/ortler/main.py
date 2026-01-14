@@ -9,6 +9,7 @@ Author: Hannah Bast <bast@cs.uni-freiburg.de>
 
 import argparse
 import importlib
+import importlib.metadata
 import os
 import pkgutil
 from pathlib import Path
@@ -48,6 +49,13 @@ def discover_commands() -> list[Command]:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="A command-line tool for managing OpenReview venues"
+    )
+
+    # Version
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"ortler {importlib.metadata.version('ortler')}",
     )
 
     # Global command-independent arguments.
