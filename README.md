@@ -9,20 +9,22 @@ and a beautiful mountain in the Alps.
 
 ## Quickstart
 
-### Installation
+### Installation and updates
 
 ```bash
 # Install with pipx (recommended)
-pipx install git+https://github.com/ad-freiburg/ortler.git
+pipx install ortler
 
-# Or with pip in a virtual environment
-python3 -m venv venv && source venv/bin/activate
-pip install git+https://github.com/ad-freiburg/ortler.git
+# Get latest version
+pipx upgrade ortler
 
 # Or install in editable mode for development
 git clone git@github.com:ad-freiburg/ortler.git
 cd ortler
 pipx install -e .
+
+# Get latest version from git:w
+git pull
 ```
 
 ### Configuration
@@ -34,7 +36,26 @@ OPENREVIEW_API_URL=https://api2.openreview.net
 OPENREVIEW_USERNAME=your.email@example.com
 OPENREVIEW_PASSWORD=your-password
 OPENREVIEW_VENUE_ID=Your/Venue/ID
+OPENREVIEW_IMPERSONATE_GROUP=Your/Venue/ID
 MAIL_FROM=Your Choice <your-choice@openreview.net>
+```
+
+If you want to use `ortler mail` with `--recipients-from-sparql-query`, you
+also need to and provide the API of a SPARQL endpoint (e.g., QLever), and a
+username and password in case that endpoint requires authentication:
+
+```bash
+QLEVER_LINK_API=https://qlever.dev/api/link/
+QLEVER_QUERY_API=https://qlever.dev/api/...
+QLEVER_QUERY_API_USERNAME=username
+QLEVER_QUERY_API_PASSWORD=password
+```
+
+If you want to use commands that require a language model (like `ortler
+ai-review`), you also need to provide an API key for that model:
+
+```bash
+OPENAI_API_KEY=your-openai-api-key
 ```
 
 ### Usage
@@ -62,6 +83,9 @@ ortler update --recache submissions
 
 # Force re-fetch of all profiles with publications
 ortler update --recache profiles-with-publications
+
+# Force re-fetch only of the specified profiles
+ortler update --profiles ~John_Doe1 ~Jane_Doe2
 
 # Force re-fetch of everything
 ortler update --recache all
@@ -123,10 +147,13 @@ ortler mail message.txt --recipients-from-sparql-query QUERY_HASH
 
 Example email file; the `{{name}}` placeholder will be replaced with the
 recipient's first name if that information is available, otherwise the full
-name.
+name. If the Cc is provided, a single email is sent to that address, with
+the list of recipients, a link to the SPARQL query, and the mail body.
 ```
 To: ~Recipient_Profile1 ~Recipient_Profile2 ...
 Subject: Your subject line
+Cc: ...
+Reply-To: ...
 
 Dear {{name}},
 
@@ -143,9 +170,11 @@ query result, where all values are profile IRIs; other columns of the result
 can be used as additional placeholders in the email body, where, for example, 
 `{{titles}}` will be replaced by the content of the `?titles` variable.
 ```
-# Query: https://qlever.dev/your-backend/QUERY_HASH
+# Query: https://qlever.dev/name-of-endpoint/QUERY_HASH
 To: (will be replaced by profile IDs from query result)
 Subject: Your submissions
+Cc: ...
+Reply-To: ...
 
 Dear {{name}},
 
