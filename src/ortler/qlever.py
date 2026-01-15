@@ -71,30 +71,6 @@ def _convert_email_profile_to_email(profile_id: str) -> str:
     return f"{local_part}@{domain}"
 
 
-def _extract_value(cell: dict) -> str:
-    """
-    Extract a display value from a SPARQL result cell.
-    For URIs, extracts the last path component or fragment.
-    For literals, unescapes common escape sequences and returns the value.
-    """
-    cell_type = cell.get("type", "")
-    value = cell.get("value", "")
-
-    if cell_type == "uri":
-        # Extract last component from URI
-        # e.g., "https://openreview.net/profile?id=~User1" -> "~User1"
-        # e.g., "http://example.org/foo#bar" -> "bar"
-        if "?id=" in value:
-            return value.split("?id=")[-1]
-        elif "#" in value:
-            return value.split("#")[-1]
-        elif "/" in value:
-            return value.rstrip("/").split("/")[-1]
-        return value
-    else:
-        return value
-
-
 def query_results_by_recipient(hash_or_url: str) -> tuple[list[str], dict[str, dict]]:
     """
     Execute a SPARQL query and return results keyed by recipient.
@@ -146,12 +122,10 @@ def query_results_by_recipient(hash_or_url: str) -> tuple[list[str], dict[str, d
         recipient = _convert_email_profile_to_email(profile_id)
         recipients.append(recipient)
 
-        # Extract all other variables for this recipient
+        # Extract all variables for substitution (including recipient)
         row_data = {}
         for var in variables:
-            if var != recipient_var:
-                cell = row.get(var, {})
-                row_data[var] = _extract_value(cell)
+            row_data[var] = row.get(var, {}).get("value", "")
         data_by_recipient[recipient] = row_data
 
     return recipients, data_by_recipient

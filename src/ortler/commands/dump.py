@@ -236,13 +236,10 @@ class DumpCommand(Command):
                 all_author_ids.add(author_id)
 
             # Add comma-separated author IDs and names
-            author_ids_clean = [aid.lstrip("~") for aid in author_ids]
             rdf.add_triple(
                 submission_iri,
                 ":author_ids",
-                rdf.literal(", ".join(author_ids_clean))
-                if author_ids_clean
-                else ":novalue",
+                rdf.literal(", ".join(author_ids)) if author_ids else ":novalue",
             )
             author_names = rdf.valuesFromJson(content, "authors.value")
             rdf.add_triple(

@@ -3,6 +3,7 @@ Mail command for sending emails via OpenReview.
 """
 
 import os
+import random
 import re
 from argparse import ArgumentParser, Namespace
 from datetime import datetime
@@ -53,6 +54,12 @@ class MailCommand(Command):
             "--recipients-from-sparql-query",
             metavar="URL_OR_HASH",
             help="Replace To: recipients with results from a SPARQL query (URL or short hash)",
+        )
+        parser.add_argument(
+            "--random-sample",
+            type=int,
+            metavar="N",
+            help="Randomly select N recipients (useful for testing)",
         )
 
     def _get_name(self, profile) -> str:
@@ -200,11 +207,6 @@ class MailCommand(Command):
             new_to_line = "To: " + ", ".join(query_recipients)
             # Replace the first line (To: ...) with the new recipients
             content = new_to_line + content[content.index("\n") :]
-            # Write updated content back to file, preserving comment lines
-            with open(args.file, "w") as f:
-                if comment_lines:
-                    f.write("\n".join(comment_lines) + "\n")
-                f.write(content)
 
         # Split headers and body (separated by blank line)
         parts = content.split("\n\n", 1)
@@ -257,6 +259,21 @@ class MailCommand(Command):
             parsed = self._parse_from_header(r)
             original_recipients.append(parsed["fromEmail"] if "<" in r else r)
 
+        # Apply random sampling if specified
+        sampled = False
+        if args.random_sample and args.random_sample < len(original_recipients):
+            original_recipients = random.sample(original_recipients, args.random_sample)
+            sampled = True
+
+        # Write updated content back to file (with sampled recipients if applicable)
+        if query_hash_or_url:
+            new_to_line = "To: " + ", ".join(original_recipients)
+            content = new_to_line + content[content.index("\n") :]
+            with open(args.file, "w") as f:
+                if comment_lines:
+                    f.write("\n".join(comment_lines) + "\n")
+                f.write(content)
+
         # For test-run, redirect all emails to the test profile
         if args.test_run:
             recipients = [args.test_run] * len(original_recipients)
@@ -286,11 +303,13 @@ class MailCommand(Command):
         # Show what we're sending
         log.info("")
         log.info(f"From: {headers.get('From')}")
-        to_display = (
-            f"{args.test_run} (TEST-RUN, original: {headers.get('To')})"
-            if args.test_run
-            else headers.get("To")
-        )
+        to_list = ", ".join(original_recipients)
+        if args.test_run:
+            to_display = f"{args.test_run} (TEST-RUN, original: {to_list})"
+        elif sampled:
+            to_display = f"{to_list} (RANDOM SAMPLE of {args.random_sample})"
+        else:
+            to_display = to_list
         log.info(f"To: {to_display}")
         if cc_recipients:
             log.info(f"Cc: {headers.get('Cc')}")
@@ -394,8 +413,8 @@ class MailCommand(Command):
                 f"Email sent to {pluralize(sent_count)}, failed for {pluralize(failed_count)}"
             )
 
-        # Send FYI to Cc recipients
-        if cc_recipients:
+        # Send FYI to Cc recipients (skip in test-run mode)
+        if cc_recipients and not args.test_run:
             fyi_subject = f"FYI: {headers['Subject']}"
             subject_encoded = quote(headers["Subject"], safe="")
             message_log_url = (
