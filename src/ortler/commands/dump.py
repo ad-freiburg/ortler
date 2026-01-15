@@ -192,6 +192,7 @@ class DumpCommand(Command):
         Returns set of all author profile IDs.
         """
         all_author_ids = set()
+        all_author_reviewer_ids = set()
 
         for submission in submissions:
             submission_iri = rdf.paperIri(submission["id"])
@@ -251,11 +252,12 @@ class DumpCommand(Command):
             )
             rdf.add_triple(submission_iri, ":num_authors", str(len(author_ids)))
 
-            rdf.add_triple(
-                submission_iri,
-                ":author_reviewer",
-                rdf.iriFromJson(content, "serve_as_reviewer.value", "person"),
-            )
+            author_reviewer_id = content.get("serve_as_reviewer", {}).get("value", "")
+            if author_reviewer_id:
+                rdf.add_triple(
+                    submission_iri, ":author_reviewer", rdf.personIri(author_reviewer_id)
+                )
+                all_author_reviewer_ids.add(author_reviewer_id)
 
             rdf.add_triple(
                 submission_iri,
@@ -312,6 +314,17 @@ class DumpCommand(Command):
             rdf.add_triple(person_iri, "a", ":Person")
             rdf.add_triple(person_iri, "a", ":Author")
             profile_with_papers.addToRdf(rdf, author_info, author_id)
+
+        # Add Author_Reviewer type and profile triples
+        for author_reviewer_id in all_author_reviewer_ids:
+            person_iri = rdf.personIri(author_reviewer_id)
+            rdf.add_triple(person_iri, "a", ":Author_Reviewer")
+            # Add profile triples if not already an author
+            if author_reviewer_id not in all_author_ids:
+                profile_with_papers.get_profile(author_reviewer_id)
+                reviewer_info = profile_with_papers.asJson()
+                rdf.add_triple(person_iri, "a", ":Person")
+                profile_with_papers.addToRdf(rdf, reviewer_info, author_reviewer_id)
 
         return all_author_ids
 

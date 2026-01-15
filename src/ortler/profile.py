@@ -382,12 +382,29 @@ class ProfileWithPapers:
         result["publications"] = self.papers
         return result
 
+    def _add_default_person_triples(self, rdf: Rdf, person_iri: str) -> None:
+        """
+        Add all standard person triples with :novalue (or "0" for counts).
+        Used when profile data is unavailable.
+        """
+        rdf.add_triple(person_iri, ":id", ":novalue")
+        rdf.add_triple(person_iri, ":state", ":novalue")
+        rdf.add_triple(person_iri, ":gender", ":novalue")
+        rdf.add_triple(person_iri, ":dblp_id", ":novalue")
+        rdf.add_triple(person_iri, ":orcid", ":novalue")
+        rdf.add_triple(person_iri, ":email", ":novalue")
+        rdf.add_triple(person_iri, "rdfs:label", ":novalue")
+        rdf.add_triple(person_iri, ":position", ":novalue")
+        rdf.add_triple(person_iri, ":institution", ":novalue")
+        rdf.add_triple(person_iri, ":num_publications", "0")
+        rdf.add_triple(person_iri, ":num_relations", "0")
+
     def addToRdf(
         self, rdf: Rdf, profile_data: Dict[str, Any], person_id: str = ""
     ) -> str:
         """
         Add profile triples to an existing Rdf instance.
-        If profile_data has an error, adds core triples with :novalue.
+        If profile_data has an error, adds default triples with :novalue.
         If person_id is provided, use that for the IRI; otherwise use profile_data's id.
         Returns the person IRI for additional triples.
         """
@@ -397,13 +414,9 @@ class ProfileWithPapers:
 
         person_iri = rdf.personIri(effective_id)
 
-        # If there was an error fetching the profile, add core triples with :novalue
-        if profile_data.get("error"):
-            rdf.add_triple(person_iri, ":id", ":novalue")
-            rdf.add_triple(person_iri, "rdfs:label", ":novalue")
-            rdf.add_triple(person_iri, ":dblp_id", ":novalue")
-            rdf.add_triple(person_iri, ":position", ":novalue")
-            rdf.add_triple(person_iri, ":institution", ":novalue")
+        # If profile data is unavailable (error or status only), add default triples
+        if profile_data.get("error") or profile_data.get("status"):
+            self._add_default_person_triples(rdf, person_iri)
             return person_iri
 
         # Add profile ID
@@ -465,6 +478,17 @@ class ProfileWithPapers:
             if dblp_iri:
                 rdf.add_triple(person_iri, ":dblp_publication", dblp_iri)
         rdf.add_triple(person_iri, ":num_publications", str(len(papers)))
+
+        # Add relations (advisors, etc.)
+        relations = profile_data.get("content", {}).get("relations", [])
+        for rel in relations:
+            username = rel.get("username", "")
+            name = rel.get("name", "")
+            if username:
+                rdf.add_triple(person_iri, ":relation_id", rdf.personIri(username))
+            if name:
+                rdf.add_triple(person_iri, ":relation_name", rdf.literal(name))
+        rdf.add_triple(person_iri, ":num_relations", str(len(relations)))
 
         return person_iri
 

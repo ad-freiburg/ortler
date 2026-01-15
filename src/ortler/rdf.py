@@ -121,7 +121,7 @@ class Rdf:
         """
         Check if a string can be used as the local part of a Turtle prefixed name.
         Valid: letters, numbers, underscores, hyphens, dots (not at end).
-        Invalid: @, spaces, trailing dots.
+        Invalid: @, spaces, apostrophes, trailing dots.
         """
         if not local_name:
             return False
@@ -129,7 +129,7 @@ class Rdf:
             return False
         # Check for characters that are not allowed in prefixed names
         for char in local_name:
-            if char in "@ ":
+            if char in "@ '":
                 return False
         return True
 
