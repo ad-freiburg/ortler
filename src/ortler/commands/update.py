@@ -92,12 +92,13 @@ class UpdateCommand(Command):
                 try:
                     with open(cache_file) as f:
                         submission = json.load(f)
-                    author_ids = (
-                        submission.get("content", {})
-                        .get("authorids", {})
-                        .get("value", [])
-                    )
+                    content = submission.get("content", {})
+                    author_ids = content.get("authorids", {}).get("value", [])
                     tracked.update(author_ids)
+                    # Also track author_reviewer (serve_as_reviewer field)
+                    author_reviewer = content.get("serve_as_reviewer", {}).get("value")
+                    if author_reviewer:
+                        tracked.add(author_reviewer)
                 except Exception:
                     pass
 

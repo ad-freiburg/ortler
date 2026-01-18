@@ -92,6 +92,7 @@ class ProfileWithPapers:
 
         client = get_client()
         all_profiles = []
+        not_found: set[str] = set()
 
         # Batch fetch profiles by ID
         if profile_ids:
@@ -105,7 +106,7 @@ class ProfileWithPapers:
                     self._id_to_canonical[profile.id] = profile.id
 
                 # Check for input IDs that didn't match a returned canonical ID
-                # These might be aliases/merged profiles
+                # These might be aliases/merged profiles, or not yet activated
                 for input_id in profile_ids:
                     if (
                         input_id not in returned_ids
@@ -119,7 +120,7 @@ class ProfileWithPapers:
                                 all_profiles.append(profile)
                                 returned_ids.add(profile.id)
                         except Exception:
-                            pass  # Profile doesn't exist
+                            not_found.add(input_id)
             except Exception as e:
                 log.warning(f"Failed to batch check profile IDs: {e}")
                 self._profiles_needing_update = set(profile_ids)
@@ -164,6 +165,11 @@ class ProfileWithPapers:
                 # Profile has changed
                 log.info(f"Changed profile: {canonical_id}")
                 self._profiles_needing_update.add(canonical_id)
+
+        # Retry profiles that weren't found (may be newly activated)
+        for profile_id in not_found:
+            if profile_id not in self._id_to_canonical:
+                self._profiles_needing_update.add(profile_id)
 
         self._batch_check_done = True
 
