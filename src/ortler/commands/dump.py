@@ -186,16 +186,19 @@ class DumpCommand(Command):
         args: Namespace,
         submissions: list[dict],
         profile_with_papers: ProfileWithPapers,
-    ) -> set[str]:
+    ) -> tuple[set[str], set[str]]:
         """
         Add RDF triples for all submissions.
-        Returns set of all author profile IDs.
+        Returns tuple of (author profile IDs, submission IDs).
         """
         all_author_ids = set()
         all_author_reviewer_ids = set()
+        all_submission_ids = set()
 
         for submission in submissions:
-            submission_iri = rdf.paperIri(submission["id"])
+            submission_id = submission["id"]
+            all_submission_ids.add(submission_id)
+            submission_iri = rdf.paperIri(submission_id)
             content = submission.get("content", {})
 
             rdf.add_triple(submission_iri, "a", ":Submission")
@@ -210,10 +213,10 @@ class DumpCommand(Command):
                 status = "withdrawn"
                 title_prefix = "[W] "
             elif any("Desk_Rejected_Submission" in inv for inv in invitations):
-                status = "desk_rejected"
+                status = "desk rejected"
                 title_prefix = "[R] "
             else:
-                status = "active"
+                status = "submitted"
                 title_prefix = ""
             rdf.add_triple(submission_iri, ":status", rdf.literal(status))
 
@@ -233,6 +236,8 @@ class DumpCommand(Command):
             author_ids = rdf.valuesFromJson(content, "authorids.value")
             for author_id in author_ids:
                 rdf.add_triple(submission_iri, ":author", rdf.personIri(author_id))
+                # Also add reverse :publication triple so submissions appear in author's publications
+                rdf.add_triple(rdf.personIri(author_id), ":publication", submission_iri)
                 all_author_ids.add(author_id)
 
             # Add comma-separated author IDs and names
@@ -252,7 +257,9 @@ class DumpCommand(Command):
             author_reviewer_id = content.get("serve_as_reviewer", {}).get("value", "")
             if author_reviewer_id:
                 rdf.add_triple(
-                    submission_iri, ":author_reviewer", rdf.personIri(author_reviewer_id)
+                    submission_iri,
+                    ":author_reviewer",
+                    rdf.personIri(author_reviewer_id),
                 )
                 all_author_reviewer_ids.add(author_reviewer_id)
 
@@ -303,6 +310,8 @@ class DumpCommand(Command):
             )
 
         # Add author profile triples
+        # Track processed publications to avoid duplicate type/status triples
+        processed_publications: set[str] = set()
         for author_id in all_author_ids:
             profile_with_papers.get_profile(author_id)
             author_info = profile_with_papers.asJson()
@@ -310,7 +319,13 @@ class DumpCommand(Command):
             person_iri = rdf.personIri(author_id)
             rdf.add_triple(person_iri, "a", ":Person")
             rdf.add_triple(person_iri, "a", ":Author")
-            profile_with_papers.addToRdf(rdf, author_info, author_id)
+            profile_with_papers.addToRdf(
+                rdf,
+                author_info,
+                author_id,
+                submission_ids=all_submission_ids,
+                processed_publications=processed_publications,
+            )
 
         # Add Author_Reviewer type and profile triples
         for author_reviewer_id in all_author_reviewer_ids:
@@ -321,9 +336,15 @@ class DumpCommand(Command):
                 profile_with_papers.get_profile(author_reviewer_id)
                 reviewer_info = profile_with_papers.asJson()
                 rdf.add_triple(person_iri, "a", ":Person")
-                profile_with_papers.addToRdf(rdf, reviewer_info, author_reviewer_id)
+                profile_with_papers.addToRdf(
+                    rdf,
+                    reviewer_info,
+                    author_reviewer_id,
+                    submission_ids=all_submission_ids,
+                    processed_publications=processed_publications,
+                )
 
-        return all_author_ids
+        return all_author_ids, all_submission_ids
 
     def execute(self, args: Namespace) -> None:
         """

@@ -406,12 +406,21 @@ class ProfileWithPapers:
         rdf.add_triple(person_iri, ":num_relations", "0")
 
     def addToRdf(
-        self, rdf: Rdf, profile_data: Dict[str, Any], person_id: str = ""
+        self,
+        rdf: Rdf,
+        profile_data: Dict[str, Any],
+        person_id: str = "",
+        submission_ids: set[str] | None = None,
+        processed_publications: set[str] | None = None,
     ) -> str:
         """
         Add profile triples to an existing Rdf instance.
         If profile_data has an error, adds default triples with :novalue.
         If person_id is provided, use that for the IRI; otherwise use profile_data's id.
+        If submission_ids is provided, profile publications not in that set get
+        type :Publication and :status "published".
+        If processed_publications is provided, it tracks which publications have
+        already had their type/status added (to avoid duplicates).
         Returns the person IRI for additional triples.
         """
         effective_id = person_id if person_id else profile_data.get("id", "")
@@ -479,7 +488,28 @@ class ProfileWithPapers:
         # Add publications
         papers = profile_data.get("publications", [])
         for paper in papers:
-            rdf.add_triple(person_iri, ":publication", rdf.paperIri(paper["id"]))
+            paper_id = paper["id"]
+            paper_iri = rdf.paperIri(paper_id)
+            rdf.add_triple(person_iri, ":publication", paper_iri)
+            # Add triples for profile publications that aren't venue submissions
+            # Skip if already processed (shared by multiple authors)
+            if submission_ids is not None and paper_id not in submission_ids:
+                if (
+                    processed_publications is None
+                    or paper_id not in processed_publications
+                ):
+                    rdf.add_triple(paper_iri, "a", ":Publication")
+                    rdf.add_triple(paper_iri, ":status", rdf.literal("published"))
+                    # Add title (can be string or dict with 'value' key)
+                    title = paper.get("content", {}).get("title", "")
+                    if isinstance(title, dict):
+                        title = title.get("value", "")
+                    if title:
+                        title_literal = rdf.literal(title)
+                        rdf.add_triple(paper_iri, ":title", title_literal)
+                        rdf.add_triple(paper_iri, "rdfs:label", title_literal)
+                    if processed_publications is not None:
+                        processed_publications.add(paper_id)
             dblp_iri = rdf.dblpUrlFromBibtex(paper)
             if dblp_iri:
                 rdf.add_triple(person_iri, ":dblp_publication", dblp_iri)
