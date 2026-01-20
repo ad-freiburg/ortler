@@ -3,6 +3,7 @@ ProfileWithPapers class for handling OpenReview profile data with imported paper
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Dict, Any
 
@@ -485,8 +486,14 @@ class ProfileWithPapers:
             person_iri, ":institution", rdf.literalFromJson(current, "institution.name")
         )
 
-        # Add publications
+        # Add publications and collect co-authors
         papers = profile_data.get("publications", [])
+        coauthors: set[str] = set()
+        # Get this person's name for exclusion from co-authors
+        person_name = ""
+        if names and len(names) > 0:
+            person_name = names[0].get("fullname", "")
+
         for paper in papers:
             paper_id = paper["id"]
             paper_iri = rdf.paperIri(paper_id)
@@ -513,7 +520,21 @@ class ProfileWithPapers:
             dblp_iri = rdf.dblpUrlFromBibtex(paper)
             if dblp_iri:
                 rdf.add_triple(person_iri, ":dblp_publication", dblp_iri)
+            # Collect co-authors from this paper
+            paper_authors = paper.get("content", {}).get("authors", [])
+            if isinstance(paper_authors, dict):
+                paper_authors = paper_authors.get("value", [])
+            for author_name in paper_authors:
+                if author_name and author_name != person_name:
+                    coauthors.add(author_name)
+
         rdf.add_triple(person_iri, ":num_publications", str(len(papers)))
+
+        # Add co-author triples (each unique co-author once)
+        # Clean suffixes like " 0001" (space + exactly 4 digits)
+        cleaned_coauthors = {re.sub(r" \d{4}$", "", name) for name in coauthors}
+        for coauthor in cleaned_coauthors:
+            rdf.add_triple(person_iri, ":has_coauthor", rdf.literal(coauthor))
 
         # Add relations (advisors, etc.)
         relations = profile_data.get("content", {}).get("relations", [])
