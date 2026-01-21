@@ -91,6 +91,9 @@ class DumpCommand(Command):
         all_groups: dict[str, dict],
         reduced_loads: dict[str, int],
         profile_with_papers: ProfileWithPapers,
+        submission_ids: set[str],
+        processed_publications: set[str],
+        processed_persons: set[str],
     ) -> set[str]:
         """
         Add RDF triples for all recruitment roles.
@@ -176,7 +179,14 @@ class DumpCommand(Command):
                         break
 
                 # Add profile data
-                profile_with_papers.addToRdf(rdf, member_info, canonical_id)
+                profile_with_papers.addToRdf(
+                    rdf,
+                    member_info,
+                    canonical_id,
+                    submission_ids=submission_ids,
+                    processed_publications=processed_publications,
+                    processed_persons=processed_persons,
+                )
 
         return all_member_ids
 
@@ -186,6 +196,9 @@ class DumpCommand(Command):
         args: Namespace,
         submissions: list[dict],
         profile_with_papers: ProfileWithPapers,
+        submission_ids: set[str],
+        processed_publications: set[str],
+        processed_persons: set[str],
     ) -> tuple[set[str], set[str]]:
         """
         Add RDF triples for all submissions.
@@ -193,11 +206,9 @@ class DumpCommand(Command):
         """
         all_author_ids = set()
         all_author_reviewer_ids = set()
-        all_submission_ids = set()
 
         for submission in submissions:
             submission_id = submission["id"]
-            all_submission_ids.add(submission_id)
             submission_iri = rdf.paperIri(submission_id)
             content = submission.get("content", {})
 
@@ -310,8 +321,6 @@ class DumpCommand(Command):
             )
 
         # Add author profile triples
-        # Track processed publications to avoid duplicate type/status triples
-        processed_publications: set[str] = set()
         for author_id in all_author_ids:
             profile_with_papers.get_profile(author_id)
             author_info = profile_with_papers.asJson()
@@ -323,8 +332,9 @@ class DumpCommand(Command):
                 rdf,
                 author_info,
                 author_id,
-                submission_ids=all_submission_ids,
+                submission_ids=submission_ids,
                 processed_publications=processed_publications,
+                processed_persons=processed_persons,
             )
 
         # Add Author_Reviewer type and profile triples
@@ -340,11 +350,12 @@ class DumpCommand(Command):
                     rdf,
                     reviewer_info,
                     author_reviewer_id,
-                    submission_ids=all_submission_ids,
+                    submission_ids=submission_ids,
                     processed_publications=processed_publications,
+                    processed_persons=processed_persons,
                 )
 
-        return all_author_ids, all_submission_ids
+        return all_author_ids, submission_ids
 
     def execute(self, args: Namespace) -> None:
         """
@@ -366,6 +377,11 @@ class DumpCommand(Command):
 
         rdf = Rdf()
 
+        # Extract submission IDs and create shared tracking sets
+        submission_ids = {s["id"] for s in submissions}
+        processed_publications: set[str] = set()
+        processed_persons: set[str] = set()
+
         # Add recruitment triples
         if all_groups:
             member_count = sum(
@@ -374,13 +390,28 @@ class DumpCommand(Command):
             )
             log.info(f"Adding triples for {member_count} committee members...")
             self._add_recruitment_triples(
-                rdf, args, all_groups, reduced_loads, profile_with_papers
+                rdf,
+                args,
+                all_groups,
+                reduced_loads,
+                profile_with_papers,
+                submission_ids,
+                processed_publications,
+                processed_persons,
             )
 
         # Add submission triples
         if submissions:
             log.info(f"Adding triples for {len(submissions)} submissions...")
-            self._add_submission_triples(rdf, args, submissions, profile_with_papers)
+            self._add_submission_triples(
+                rdf,
+                args,
+                submissions,
+                profile_with_papers,
+                submission_ids,
+                processed_publications,
+                processed_persons,
+            )
 
         # Output
         output_content = rdf.as_turtle()

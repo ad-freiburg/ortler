@@ -413,6 +413,7 @@ class ProfileWithPapers:
         person_id: str = "",
         submission_ids: set[str] | None = None,
         processed_publications: set[str] | None = None,
+        processed_persons: set[str] | None = None,
     ) -> str:
         """
         Add profile triples to an existing Rdf instance.
@@ -422,6 +423,8 @@ class ProfileWithPapers:
         type :Publication and :status "published".
         If processed_publications is provided, it tracks which publications have
         already had their type/status added (to avoid duplicates).
+        If processed_persons is provided, it tracks which persons have already
+        had their :num_publications added (to avoid duplicates).
         Returns the person IRI for additional triples.
         """
         effective_id = person_id if person_id else profile_data.get("id", "")
@@ -500,7 +503,7 @@ class ProfileWithPapers:
             rdf.add_triple(person_iri, ":publication", paper_iri)
             # Add triples for profile publications that aren't venue submissions
             # Skip if already processed (shared by multiple authors)
-            if submission_ids is not None and paper_id not in submission_ids:
+            if submission_ids is None or paper_id not in submission_ids:
                 if (
                     processed_publications is None
                     or paper_id not in processed_publications
@@ -528,7 +531,16 @@ class ProfileWithPapers:
                 if author_name and author_name != person_name:
                     coauthors.add(author_name)
 
-        rdf.add_triple(person_iri, ":num_publications", str(len(papers)))
+        # Count publications with :status "published" (those not in submission_ids)
+        if processed_persons is None or effective_id not in processed_persons:
+            num_published = sum(
+                1
+                for p in papers
+                if submission_ids is None or p["id"] not in submission_ids
+            )
+            rdf.add_triple(person_iri, ":num_publications", str(num_published))
+            if processed_persons is not None:
+                processed_persons.add(effective_id)
 
         # Add co-author triples (each unique co-author once)
         # Clean suffixes like " 0001" (space + exactly 4 digits)
