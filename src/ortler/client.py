@@ -81,6 +81,7 @@ def get_client_v1() -> openreview.Client:
     Used for fetching legacy data (DBLP/ORCID imports).
 
     Uses environment variables for configuration:
+    - OPENREVIEW_API_URL (to derive v1 URL from v2 URL)
     - OPENREVIEW_USERNAME
     - OPENREVIEW_PASSWORD
     """
@@ -88,8 +89,20 @@ def get_client_v1() -> openreview.Client:
 
     if _client_v1_instance is None:
         try:
+            # Derive API v1 URL from API v2 URL
+            api_url = os.environ.get(
+                "OPENREVIEW_API_URL", "https://api2.openreview.net"
+            )
+            if "devapi2" in api_url:
+                v1_url = "https://devapi.openreview.net"
+            elif "api2" in api_url:
+                v1_url = "https://api.openreview.net"
+            else:
+                # Fallback: assume production
+                v1_url = "https://api.openreview.net"
+
             _client_v1_instance = openreview.Client(
-                baseurl="https://api.openreview.net",
+                baseurl=v1_url,
                 username=os.environ.get("OPENREVIEW_USERNAME"),
                 password=os.environ.get("OPENREVIEW_PASSWORD"),
             )
