@@ -76,6 +76,10 @@ class ProfileWithPapers:
         """Return the current ID mapping (for saving to cache)."""
         return self._id_to_canonical.copy()
 
+    def resolve_id(self, profile_id: str) -> str:
+        """Resolve a profile ID to its canonical form using the ID mapping."""
+        return self._id_to_canonical.get(profile_id, profile_id)
+
     def check_profiles_for_updates(self, member_ids: list[str]) -> set[str]:
         """
         Batch check which profiles have changed since they were cached.
@@ -403,6 +407,7 @@ class ProfileWithPapers:
         rdf.add_triple(person_iri, "rdfs:label", ":novalue")
         rdf.add_triple(person_iri, ":position", ":novalue")
         rdf.add_triple(person_iri, ":institution", ":novalue")
+        rdf.add_triple(person_iri, ":country", ":novalue")
         rdf.add_triple(person_iri, ":num_publications", "0")
         rdf.add_triple(person_iri, ":num_relations", "0")
 
@@ -488,6 +493,9 @@ class ProfileWithPapers:
         rdf.add_triple(
             person_iri, ":institution", rdf.literalFromJson(current, "institution.name")
         )
+        rdf.add_triple(
+            person_iri, ":country", rdf.literalFromJson(current, "institution.country")
+        )
 
         # Add publications and collect co-authors
         papers = profile_data.get("publications", [])
@@ -554,7 +562,9 @@ class ProfileWithPapers:
             username = rel.get("username", "")
             name = rel.get("name", "")
             if username:
-                rdf.add_triple(person_iri, ":relation_id", rdf.personIri(username))
+                # Resolve to canonical ID
+                canonical_username = self.resolve_id(username)
+                rdf.add_triple(person_iri, ":relation_id", rdf.personIri(canonical_username))
             if name:
                 rdf.add_triple(person_iri, ":relation_name", rdf.literal(name))
         rdf.add_triple(person_iri, ":num_relations", str(len(relations)))

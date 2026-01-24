@@ -11,6 +11,7 @@ from ..command import Command
 from ..client import get_client
 from ..profile import ProfileWithPapers
 from ..log import log
+from ..custom_stages import get_all_stage_definitions, fetch_stage_responses
 
 
 class UpdateCommand(Command):
@@ -152,28 +153,42 @@ class UpdateCommand(Command):
 
                 log.info(f"{label}: {submission.id}")
 
-            # Get modified submissions (sort by tmdate, stop when older than last_update)
+            # Get modified submissions (sort by tmdate desc, stop when older than last_update)
             # Use trash=True to include deleted submissions (have ddate set)
+            # Paginate manually to ensure we get ALL modified submissions
             try:
-                all_submissions = client.get_notes(
-                    invitation=invitation, sort="tmdate:desc", limit=100, trash=True
-                )
-                for submission in all_submissions:
-                    if submission.tmdate < last_update:
+                offset = 0
+                page_size = 1000
+                done = False
+                while not done:
+                    page = client.get_notes(
+                        invitation=invitation,
+                        sort="tmdate:desc",
+                        offset=offset,
+                        limit=page_size,
+                        trash=True,
+                    )
+                    if not page:
                         break
-                    # Skip if it's a new submission (already processed)
-                    if submission.tcdate >= last_update:
-                        continue
+                    for submission in page:
+                        # Stop when we reach submissions not modified since last update
+                        if submission.tmdate < last_update:
+                            done = True
+                            break
+                        # Skip if it's a new submission (already processed above)
+                        if submission.tcdate >= last_update:
+                            continue
 
-                    modified_count += 1
+                        modified_count += 1
 
-                    if not dry_run:
-                        submissions_cache_dir.mkdir(parents=True, exist_ok=True)
-                        cache_path = submissions_cache_dir / f"{submission.id}.json"
-                        with open(cache_path, "w") as f:
-                            json.dump(submission.to_json(), f, indent=2)
+                        if not dry_run:
+                            submissions_cache_dir.mkdir(parents=True, exist_ok=True)
+                            cache_path = submissions_cache_dir / f"{submission.id}.json"
+                            with open(cache_path, "w") as f:
+                                json.dump(submission.to_json(), f, indent=2)
 
-                    log.info(f"Modified {suffix.lower()}: {submission.id}")
+                        log.info(f"Modified {suffix.lower()}: {submission.id}")
+                    offset += page_size
 
             except Exception as e:
                 log.warning(f"Failed to check modified {suffix}: {e}")
@@ -396,6 +411,136 @@ class UpdateCommand(Command):
                 json.dump(all_reduced_loads, f, indent=2)
             log.info(f"Cached {len(all_reduced_loads)} reduced load entries")
 
+    # Configuration for status reversions: (invitation_marker, action_pattern, reversion_pattern, cache_file)
+    _REVERSION_TYPES = [
+        (
+            "Withdrawn_Submission",
+            "/Withdrawal",
+            "Withdrawal_Reversion",
+            "_reversed_withdrawals.json",
+        ),
+        (
+            "Desk_Rejected_Submission",
+            "/Desk_Rejection",
+            "Desk_Rejection_Reversion",
+            "_reversed_desk_rejections.json",
+        ),
+    ]
+
+    def _check_reversion(
+        self, forum_notes: list, action_pattern: str, reversion_pattern: str
+    ) -> bool:
+        """
+        Check if an action (withdrawal/desk rejection) has been reversed.
+        Returns True if the most recent reversion is after the most recent action.
+        """
+        action_tcdate = None
+        reversion_tcdate = None
+
+        for note in forum_notes:
+            inv = note.invitations[0] if note.invitations else ""
+            if reversion_pattern in inv:
+                if reversion_tcdate is None or note.tcdate > reversion_tcdate:
+                    reversion_tcdate = note.tcdate
+            elif action_pattern in inv and "Reversion" not in inv:
+                if action_tcdate is None or note.tcdate > action_tcdate:
+                    action_tcdate = note.tcdate
+
+        return bool(
+            reversion_tcdate and action_tcdate and reversion_tcdate > action_tcdate
+        )
+
+    def _update_status_reversions(
+        self, args: Namespace, client, dry_run: bool
+    ) -> tuple[int, int]:
+        """
+        Check for withdrawal and desk rejection reversions.
+        A submission is effectively withdrawn/desk-rejected only if the most recent
+        action is the withdrawal/rejection, not a reversion.
+        Returns tuple of (reversed_withdrawals_count, reversed_desk_rejections_count).
+        """
+        submissions_cache_dir = Path(args.cache_dir) / "submissions"
+        if not submissions_cache_dir.exists():
+            return 0, 0
+
+        # Find submissions needing reversion checks
+        # Map submission_id -> list of (action_pattern, reversion_pattern, cache_file)
+        submissions_to_check: dict[str, list[tuple[str, str, str]]] = {}
+        for cache_file in submissions_cache_dir.glob("*.json"):
+            if cache_file.name.startswith("_"):
+                continue
+            try:
+                with open(cache_file) as f:
+                    submission = json.load(f)
+                invitations = submission.get("invitations", [])
+                sid = submission["id"]
+                for inv_marker, action_pat, rev_pat, cache_fn in self._REVERSION_TYPES:
+                    if any(inv_marker in inv for inv in invitations):
+                        submissions_to_check.setdefault(sid, []).append(
+                            (action_pat, rev_pat, cache_fn)
+                        )
+            except Exception:
+                pass
+
+        # Track reversed submissions by cache file
+        reversed_by_file: dict[str, set[str]] = {
+            cfg[3]: set() for cfg in self._REVERSION_TYPES
+        }
+
+        # Check reversions (fetch forum notes once per submission)
+        for submission_id, checks in submissions_to_check.items():
+            try:
+                forum_notes = list(client.get_all_notes(forum=submission_id))
+                for action_pat, rev_pat, cache_fn in checks:
+                    if self._check_reversion(forum_notes, action_pat, rev_pat):
+                        reversed_by_file[cache_fn].add(submission_id)
+                        # e.g. "Withdrawal_Reversion" -> "Withdrawal reversed"
+                        action_name = rev_pat.replace("_Reversion", "").replace(
+                            "_", " "
+                        )
+                        log.info(f"{action_name} reversed: {submission_id}")
+            except Exception as e:
+                log.warning(
+                    f"Failed to check status reversions for {submission_id}: {e}"
+                )
+
+        # Save to cache
+        if not dry_run:
+            for cache_fn, reversed_ids in reversed_by_file.items():
+                cache_path = submissions_cache_dir / cache_fn
+                with open(cache_path, "w") as f:
+                    json.dump(list(reversed_ids), f, indent=2)
+
+        return tuple(len(reversed_by_file[cfg[3]]) for cfg in self._REVERSION_TYPES)
+
+    def _update_custom_stages(self, args: Namespace, client, dry_run: bool) -> int:
+        """
+        Fetch and cache responses for all custom stages.
+        Returns total number of responses cached.
+        """
+        stage_definitions = get_all_stage_definitions()
+        if not stage_definitions:
+            return 0
+
+        total_responses = 0
+        tasks_cache_dir = Path(args.cache_dir) / "tasks"
+
+        for stage_def in stage_definitions:
+            stage_name = stage_def.get("name", "")
+            responses = fetch_stage_responses(client, args.venue_id, stage_def)
+
+            if responses:
+                total_responses += len(responses)
+                if not dry_run:
+                    tasks_cache_dir.mkdir(parents=True, exist_ok=True)
+                    cache_filename = stage_name.lower() + ".json"
+                    cache_path = tasks_cache_dir / cache_filename
+                    with open(cache_path, "w") as f:
+                        json.dump(responses, f, indent=2)
+                log.info(f"Cached {len(responses)} {stage_name} responses")
+
+        return total_responses
+
     def execute(self, args: Namespace) -> None:
         """
         Execute the update command.
@@ -476,6 +621,16 @@ class UpdateCommand(Command):
         log.info("Updating reduced loads cache...")
         self._update_reduced_loads(args, client, args.dry_run)
 
+        # Step 7: Update custom stage responses cache
+        log.info("Updating custom stage responses cache...")
+        stage_responses_count = self._update_custom_stages(args, client, args.dry_run)
+
+        # Step 8: Check for status reversions (withdrawal and desk rejection)
+        log.info("Checking for status reversions...")
+        reversed_withdrawals, reversed_desk_rejections = self._update_status_reversions(
+            args, client, args.dry_run
+        )
+
         # Save new timestamp (unless dry run)
         if not args.dry_run:
             metadata["last_update_timestamp"] = current_time
@@ -489,6 +644,9 @@ class UpdateCommand(Command):
         log.info(f"Profiles with new publications: {len(profiles_with_new_pubs)}")
         log.info(f"Profiles updated: {updated_profiles}")
         log.info(f"Groups with membership changes: {len(changed_groups)}")
+        log.info(f"Custom stage responses: {stage_responses_count}")
+        log.info(f"Reversed withdrawals: {reversed_withdrawals}")
+        log.info(f"Reversed desk rejections: {reversed_desk_rejections}")
 
         if args.dry_run:
             log.info("")

@@ -10,6 +10,7 @@ from ..command import Command
 from ..rdf import Rdf
 from ..profile import ProfileWithPapers
 from ..log import log
+from ..custom_stages import get_all_stage_definitions, add_stage_triples
 
 
 class DumpCommand(Command):
@@ -60,12 +61,23 @@ class DumpCommand(Command):
         submissions = []
         if submissions_dir.exists():
             for cache_file in submissions_dir.glob("*.json"):
+                # Skip metadata files
+                if cache_file.name.startswith("_"):
+                    continue
                 try:
                     with open(cache_file) as f:
                         submissions.append(json.load(f))
                 except Exception:
                     pass
         return submissions
+
+    def _load_reversed_ids(self, cache_dir: str, filename: str) -> set[str]:
+        """Load set of submission IDs from a reversions cache file."""
+        cache_path = Path(cache_dir) / "submissions" / filename
+        if cache_path.exists():
+            with open(cache_path) as f:
+                return set(json.load(f))
+        return set()
 
     def _load_review(self, cache_dir: str, submission_id: str) -> dict | None:
         """Load AI review from cache if available."""
@@ -74,6 +86,18 @@ class DumpCommand(Command):
             with open(review_path) as f:
                 return json.load(f)
         return None
+
+    def _load_stage_responses(self, cache_dir: str, stage_name: str) -> dict[str, dict]:
+        """Load cached responses for a custom stage.
+        Returns dict: author_id -> {field_name: value}
+        """
+        # Convert stage name to cache filename (e.g., "DBLP_and_Imported_Publications" -> "dblp_and_imported_publications.json")
+        cache_filename = stage_name.lower() + ".json"
+        cache_path = Path(cache_dir) / "tasks" / cache_filename
+        if cache_path.exists():
+            with open(cache_path) as f:
+                return json.load(f)
+        return {}
 
     def _get_rdf_class(self, role_suffix: str) -> str:
         """Get RDF class name for a role suffix."""
@@ -199,6 +223,8 @@ class DumpCommand(Command):
         submission_ids: set[str],
         processed_publications: set[str],
         processed_persons: set[str],
+        reversed_withdrawals: set[str],
+        reversed_desk_rejections: set[str],
     ) -> tuple[set[str], set[str]]:
         """
         Add RDF triples for all submissions.
@@ -216,14 +242,24 @@ class DumpCommand(Command):
 
             # Derive status from ddate and invitations
             # ddate = deletion date (soft delete, shown as greyed out in UI)
+            # Check reversed_withdrawals/reversed_desk_rejections for reversions
             invitations = submission.get("invitations", [])
+            has_withdrawn_inv = any(
+                "Withdrawn_Submission" in inv for inv in invitations
+            )
+            has_desk_rejected_inv = any(
+                "Desk_Rejected_Submission" in inv for inv in invitations
+            )
+            withdrawal_reversed = submission_id in reversed_withdrawals
+            desk_rejection_reversed = submission_id in reversed_desk_rejections
+
             if submission.get("ddate"):
                 status = "deleted"
                 title_prefix = "[D] "
-            elif any("Withdrawn_Submission" in inv for inv in invitations):
+            elif has_withdrawn_inv and not withdrawal_reversed:
                 status = "withdrawn"
                 title_prefix = "[W] "
-            elif any("Desk_Rejected_Submission" in inv for inv in invitations):
+            elif has_desk_rejected_inv and not desk_rejection_reversed:
                 status = "desk rejected"
                 title_prefix = "[R] "
             else:
@@ -244,7 +280,9 @@ class DumpCommand(Command):
                 rdf.literalFromJson(content, "abstract.value"),
             )
 
-            author_ids = rdf.valuesFromJson(content, "authorids.value")
+            author_ids_raw = rdf.valuesFromJson(content, "authorids.value")
+            # Resolve aliases to canonical IDs
+            author_ids = [profile_with_papers.resolve_id(aid) for aid in author_ids_raw]
             for author_id in author_ids:
                 rdf.add_triple(submission_iri, ":author", rdf.personIri(author_id))
                 # Also add reverse :publication triple so submissions appear in author's publications
@@ -265,8 +303,13 @@ class DumpCommand(Command):
             )
             rdf.add_triple(submission_iri, ":num_authors", str(len(author_ids)))
 
-            author_reviewer_id = content.get("serve_as_reviewer", {}).get("value", "")
-            if author_reviewer_id:
+            author_reviewer_id_raw = content.get("serve_as_reviewer", {}).get(
+                "value", ""
+            )
+            if author_reviewer_id_raw:
+                author_reviewer_id = profile_with_papers.resolve_id(
+                    author_reviewer_id_raw
+                )
                 rdf.add_triple(
                     submission_iri,
                     ":author_reviewer",
@@ -365,6 +408,13 @@ class DumpCommand(Command):
         all_groups = self._load_groups(args.cache_dir)
         reduced_loads = self._load_reduced_loads(args.cache_dir)
         submissions = self._load_submissions(args.cache_dir)
+        reversed_withdrawals = self._load_reversed_ids(
+            args.cache_dir, "_reversed_withdrawals.json"
+        )
+        reversed_desk_rejections = self._load_reversed_ids(
+            args.cache_dir, "_reversed_desk_rejections.json"
+        )
+        stage_definitions = get_all_stage_definitions()
 
         if not all_groups and not submissions:
             log.error("No cached data. Run 'ortler update' first.")
@@ -411,7 +461,19 @@ class DumpCommand(Command):
                 submission_ids,
                 processed_publications,
                 processed_persons,
+                reversed_withdrawals,
+                reversed_desk_rejections,
             )
+
+        # Add custom stage response triples
+        for stage_def in stage_definitions:
+            stage_name = stage_def.get("name", "")
+            responses = self._load_stage_responses(args.cache_dir, stage_name)
+            if responses:
+                log.info(
+                    f"Adding triples for {len(responses)} {stage_name} responses..."
+                )
+                add_stage_triples(rdf, stage_def, responses)
 
         # Output
         output_content = rdf.as_turtle()
