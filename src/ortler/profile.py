@@ -4,6 +4,7 @@ ProfileWithPapers class for handling OpenReview profile data with imported paper
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
 
@@ -71,6 +72,19 @@ class ProfileWithPapers:
                     self._id_to_canonical = json.load(f)
             except Exception:
                 pass
+
+    def _log_error(self, profile_id: str, error: str) -> None:
+        """Append error to cache/error.log with timestamp."""
+        # cache_dir is "cache/profiles", go up one level
+        error_log_path = Path(self.cache_dir).parent / "error.log"
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Ensure single line by replacing newlines
+        error_oneline = error.replace("\n", " ").replace("\r", "")
+        try:
+            with open(error_log_path, "a") as f:
+                f.write(f"{timestamp} | {profile_id} | {error_oneline}\n")
+        except IOError:
+            pass
 
     def get_id_mapping(self) -> Dict[str, str]:
         """Return the current ID mapping (for saving to cache)."""
@@ -265,6 +279,8 @@ class ProfileWithPapers:
                 return
 
         # Fetch publications (unless skip_publications is True)
+        fetch_errors = []  # Track errors during fetching
+
         if self.skip_publications:
             # Keep existing publications from cache if available
             cached_data = self._load_from_cache(canonical_profile_id)
@@ -290,6 +306,7 @@ class ProfileWithPapers:
                 )
             except Exception as e:
                 log.error(f"Error fetching publications from API v2: {e}")
+                fetch_errors.append(f"API v2: {e}")
 
             # Query API v1 (legacy API, contains most DBLP/ORCID imports)
             try:
@@ -300,6 +317,7 @@ class ProfileWithPapers:
                 )
             except Exception as e:
                 log.error(f"Error fetching publications from API v1: {e}")
+                fetch_errors.append(f"API v1: {e}")
 
             # Process papers
             self.papers = []
@@ -307,8 +325,15 @@ class ProfileWithPapers:
                 self.papers.append(paper.to_json())
 
         # Save to cache if caching is enabled (use canonical profile ID to avoid duplicates)
+        # Skip saving if there were fetch errors to allow retry on next update
         if self.cache_profiles:
-            self._save_to_cache(canonical_profile_id)
+            if fetch_errors:
+                self._log_error(canonical_profile_id, "; ".join(fetch_errors))
+                log.warning(
+                    f"Skipping cache save for {canonical_profile_id} due to fetch errors"
+                )
+            else:
+                self._save_to_cache(canonical_profile_id)
 
     def _get_cache_filename(self, profile_id: str) -> str:
         """
@@ -564,7 +589,9 @@ class ProfileWithPapers:
             if username:
                 # Resolve to canonical ID
                 canonical_username = self.resolve_id(username)
-                rdf.add_triple(person_iri, ":relation_id", rdf.personIri(canonical_username))
+                rdf.add_triple(
+                    person_iri, ":relation_id", rdf.personIri(canonical_username)
+                )
             if name:
                 rdf.add_triple(person_iri, ":relation_name", rdf.literal(name))
         rdf.add_triple(person_iri, ":num_relations", str(len(relations)))
