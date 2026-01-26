@@ -128,8 +128,9 @@ class Rdf:
         if local_name.endswith("."):
             return False
         # Check for characters that are not allowed in prefixed names
+        # Slashes are not allowed in Turtle prefixed local names
         for char in local_name:
-            if char in "@ '":
+            if char in "@ '/":
                 return False
         return True
 
