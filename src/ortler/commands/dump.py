@@ -239,6 +239,9 @@ class DumpCommand(Command):
             content = submission.get("content", {})
 
             rdf.add_triple(submission_iri, "a", ":Submission")
+            rdf.add_triple(submission_iri, ":id", rdf.literal(submission_id))
+            if submission.get("number"):
+                rdf.add_triple(submission_iri, ":number", str(submission["number"]))
 
             # Derive status from ddate and invitations
             # ddate = deletion date (soft delete, shown as greyed out in UI)

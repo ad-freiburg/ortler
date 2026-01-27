@@ -148,8 +148,10 @@ class UpdateCommand(Command):
                 if not dry_run:
                     submissions_cache_dir.mkdir(parents=True, exist_ok=True)
                     cache_path = submissions_cache_dir / f"{submission.id}.json"
+                    data = submission.to_json()
+                    data["number"] = submission.number
                     with open(cache_path, "w") as f:
-                        json.dump(submission.to_json(), f, indent=2)
+                        json.dump(data, f, indent=2)
 
                 log.info(f"{label}: {submission.id}")
 
@@ -184,8 +186,10 @@ class UpdateCommand(Command):
                         if not dry_run:
                             submissions_cache_dir.mkdir(parents=True, exist_ok=True)
                             cache_path = submissions_cache_dir / f"{submission.id}.json"
+                            data = submission.to_json()
+                            data["number"] = submission.number
                             with open(cache_path, "w") as f:
-                                json.dump(submission.to_json(), f, indent=2)
+                                json.dump(data, f, indent=2)
 
                         log.info(f"Modified {suffix.lower()}: {submission.id}")
                     offset += page_size
