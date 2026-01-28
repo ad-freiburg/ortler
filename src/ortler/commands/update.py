@@ -545,6 +545,138 @@ class UpdateCommand(Command):
 
         return total_responses
 
+    def _update_desk_rejection_authors(
+        self, args: Namespace, client, dry_run: bool
+    ) -> int:
+        """
+        For desk-rejected submissions missing 'desk_rejected_by', fetch the
+        tauthor from the desk rejection note's edit and save it to the cache.
+        Returns count of submissions updated.
+        """
+        submissions_cache_dir = Path(args.cache_dir) / "submissions"
+        if not submissions_cache_dir.exists():
+            return 0
+
+        # Find desk-rejected submissions without desk_rejected_by
+        to_update = []
+        for cache_file in submissions_cache_dir.glob("*.json"):
+            if cache_file.name.startswith("_"):
+                continue
+            try:
+                with open(cache_file) as f:
+                    submission = json.load(f)
+                invitations = submission.get("invitations", [])
+                if any("Desk_Rejected_Submission" in inv for inv in invitations):
+                    if "desk_rejected_by" not in submission:
+                        to_update.append((cache_file, submission))
+            except Exception:
+                pass
+
+        if not to_update:
+            return 0
+
+        log.info(f"Fetching desk rejection authors for {len(to_update)} submissions...")
+
+        # Resolve emails to canonical profile IDs (cache to avoid redundant lookups)
+        email_to_profile: dict[str, str] = {}
+
+        updated = 0
+        for cache_file, submission in to_update:
+            try:
+                # Find the desk rejection note among the forum replies
+                replies = list(client.get_all_notes(forum=submission["id"]))
+                desk_note = None
+                for reply in replies:
+                    if reply.id == submission["id"]:
+                        continue
+                    if reply.invitations and any(
+                        inv.endswith("/-/Desk_Rejection") for inv in reply.invitations
+                    ):
+                        desk_note = reply
+                        break
+
+                if not desk_note:
+                    continue
+
+                # Get edits for the desk rejection note to find tauthor
+                # Use the edit with the Desk_Rejection invitation (not /-/Edit fixes)
+                edits = client.get_note_edits(note_id=desk_note.id)
+                tauthor = None
+                for edit in edits:
+                    if (
+                        hasattr(edit, "tauthor")
+                        and edit.tauthor
+                        and edit.invitation
+                        and edit.invitation.endswith("/-/Desk_Rejection")
+                    ):
+                        tauthor = edit.tauthor
+                        break
+
+                if tauthor and not dry_run:
+                    # Resolve email to canonical profile ID
+                    if tauthor not in email_to_profile:
+                        try:
+                            profile = client.get_profile(tauthor)
+                            email_to_profile[tauthor] = profile.id
+                        except Exception:
+                            email_to_profile[tauthor] = tauthor
+                    submission["desk_rejected_by"] = email_to_profile[tauthor]
+                    with open(cache_file, "w") as f:
+                        json.dump(submission, f, indent=2)
+                    updated += 1
+
+            except Exception as e:
+                log.warning(
+                    f"Failed to get desk rejection author for {submission['id']}: {e}"
+                )
+
+        return updated
+
+    def _update_assignments(
+        self, args: Namespace, client, dry_run: bool
+    ) -> tuple[int, int]:
+        """
+        Fetch and cache SAC and AC assignments.
+        Returns tuple of (sac_count, ac_count).
+        """
+        assignments_cache_dir = Path(args.cache_dir) / "assignments"
+
+        assignment_types = [
+            ("Senior_Area_Chairs", "senior_area_chairs.json"),
+            ("Area_Chairs", "area_chairs.json"),
+        ]
+
+        counts = []
+        for role, cache_filename in assignment_types:
+            try:
+                edges = client.get_grouped_edges(
+                    invitation=f"{args.venue_id}/{role}/-/Assignment",
+                    groupby="head",
+                )
+            except Exception as e:
+                log.warning(f"Failed to fetch {role} assignments: {e}")
+                counts.append(0)
+                continue
+
+            # Convert to {submission_id: [profile_id, ...]}
+            assignments = {}
+            for group in edges:
+                submission_id = group["id"]["head"]
+                assignees = [v["tail"] for v in group["values"]]
+                assignments[submission_id] = assignees
+
+            counts.append(len(assignments))
+
+            if not dry_run and assignments:
+                assignments_cache_dir.mkdir(parents=True, exist_ok=True)
+                cache_path = assignments_cache_dir / cache_filename
+                with open(cache_path, "w") as f:
+                    json.dump(assignments, f, indent=2)
+
+            log.info(f"Cached {len(assignments)} {role} assignments")
+
+        return tuple(counts)
+
     def execute(self, args: Namespace) -> None:
         """
         Execute the update command.
@@ -629,7 +761,19 @@ class UpdateCommand(Command):
         log.info("Updating custom stage responses cache...")
         stage_responses_count = self._update_custom_stages(args, client, args.dry_run)
 
-        # Step 8: Check for status reversions (withdrawal and desk rejection)
+        # Step 8: Update assignments cache
+        log.info("Updating assignments cache...")
+        sac_assignments, ac_assignments = self._update_assignments(
+            args, client, args.dry_run
+        )
+
+        # Step 9: Fetch desk rejection authors
+        log.info("Fetching desk rejection authors...")
+        desk_rejection_authors = self._update_desk_rejection_authors(
+            args, client, args.dry_run
+        )
+
+        # Step 10: Check for status reversions (withdrawal and desk rejection)
         log.info("Checking for status reversions...")
         reversed_withdrawals, reversed_desk_rejections = self._update_status_reversions(
             args, client, args.dry_run
@@ -649,6 +793,9 @@ class UpdateCommand(Command):
         log.info(f"Profiles updated: {updated_profiles}")
         log.info(f"Groups with membership changes: {len(changed_groups)}")
         log.info(f"Custom stage responses: {stage_responses_count}")
+        log.info(f"SAC assignments: {sac_assignments}")
+        log.info(f"AC assignments: {ac_assignments}")
+        log.info(f"Desk rejection authors fetched: {desk_rejection_authors}")
         log.info(f"Reversed withdrawals: {reversed_withdrawals}")
         log.info(f"Reversed desk rejections: {reversed_desk_rejections}")
 

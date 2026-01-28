@@ -99,6 +99,25 @@ class DumpCommand(Command):
                 return json.load(f)
         return {}
 
+    def _load_assignments(self, cache_dir: str) -> dict[str, list[str]]:
+        """Load all assignments from cache.
+        Returns dict: submission_id -> [profile_id, ...]
+        """
+        assignments_dir = Path(cache_dir) / "assignments"
+        all_assignments: dict[str, list[str]] = {}
+
+        for cache_file in ["senior_area_chairs.json", "area_chairs.json"]:
+            cache_path = assignments_dir / cache_file
+            if cache_path.exists():
+                with open(cache_path) as f:
+                    data = json.load(f)
+                    for submission_id, assignees in data.items():
+                        if submission_id not in all_assignments:
+                            all_assignments[submission_id] = []
+                        all_assignments[submission_id].extend(assignees)
+
+        return all_assignments
+
     def _get_rdf_class(self, role_suffix: str) -> str:
         """Get RDF class name for a role suffix."""
         rdf_classes = {
@@ -269,6 +288,15 @@ class DumpCommand(Command):
                 status = "submitted"
                 title_prefix = ""
             rdf.add_triple(submission_iri, ":status", rdf.literal(status))
+
+            desk_rejected_by = submission.get("desk_rejected_by", "")
+            if desk_rejected_by:
+                desk_rejected_by_id = profile_with_papers.resolve_id(desk_rejected_by)
+                rdf.add_triple(
+                    submission_iri,
+                    ":desk_rejected_by",
+                    rdf.personIri(desk_rejected_by_id),
+                )
 
             title_value = content.get("title", {}).get("value", "")
             title_literal = (
@@ -467,6 +495,16 @@ class DumpCommand(Command):
                 reversed_withdrawals,
                 reversed_desk_rejections,
             )
+
+        # Add assignment triples
+        assignments = self._load_assignments(args.cache_dir)
+        if assignments:
+            assignment_count = sum(len(v) for v in assignments.values())
+            log.info(f"Adding triples for {assignment_count} assignments...")
+            for submission_id, assignees in assignments.items():
+                paper_iri = rdf.paperIri(submission_id)
+                for assignee in assignees:
+                    rdf.add_triple(paper_iri, ":assigned", rdf.personIri(assignee))
 
         # Add custom stage response triples
         for stage_def in stage_definitions:
