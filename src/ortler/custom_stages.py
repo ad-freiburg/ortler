@@ -1,7 +1,7 @@
 """
 Generic handling of custom stages for ortler.
 
-Reads stage definitions from JSON files in custom-stages/ directory,
+Reads stage definitions from JSON files in stages/ directory,
 fetches responses from OpenReview API, and generates RDF triples.
 
 Supports two types of stages:
@@ -37,7 +37,10 @@ def build_enum_mapping(stage_def: dict[str, Any]) -> dict[str, dict[str, str]]:
     content = stage_def.get("content", {})
 
     for field_name, field_def in content.items():
-        param = field_def.get("value", {}).get("param", {})
+        value = field_def.get("value", {})
+        if not isinstance(value, dict):
+            continue
+        param = value.get("param", {})
         enum_values = param.get("enum", [])
         ortler_values = param.get("ortler", [])
 
@@ -218,7 +221,7 @@ def _add_per_submission_triples(
 
 
 def get_all_stage_definitions(
-    stages_dir: str = "custom-stages",
+    stages_dir: str = "stages",
 ) -> list[dict[str, Any]]:
     """Load all custom stage definitions from the stages directory."""
     stages_path = Path(stages_dir)

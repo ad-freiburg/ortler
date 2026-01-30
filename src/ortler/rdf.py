@@ -42,6 +42,7 @@ class Rdf:
             "xsd": "http://www.w3.org/2001/XMLSchema#",
             "paper": "https://openreview.net/forum?id=",
             "person": "https://openreview.net/profile?id=~",
+            "review": "https://openreview.net/review/",
         }
         if prefixes:
             self.prefixes.update(prefixes)
@@ -146,6 +147,14 @@ class Rdf:
             return f"person:{local_name}"
         else:
             return f"<{self.prefixes['person']}{local_name}>"
+
+    def reviewIri(self, submission_id: str, person_id: str) -> str:
+        """
+        Create a review IRI from a submission ID and person ID.
+        Format: review:{submission_id}_{person_local_name}
+        """
+        local_name = person_id.lstrip("~")
+        return f"review:{submission_id}_{local_name}"
 
     def literal(self, value: str) -> str:
         """

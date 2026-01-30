@@ -632,18 +632,94 @@ class UpdateCommand(Command):
 
         return updated
 
+    def _update_official_reviews(
+        self, args: Namespace, client, dry_run: bool
+    ) -> int:
+        """
+        Fetch and cache official reviews for all submissions.
+        Resolves anonymous reviewer IDs to profile IDs.
+        Returns total number of reviews cached.
+        """
+        try:
+            submissions = list(
+                client.get_all_notes(
+                    invitation=f"{args.venue_id}/-/Submission", details="replies"
+                )
+            )
+        except Exception as e:
+            log.warning(f"Failed to fetch submissions with replies for reviews: {e}")
+            return 0
+
+        all_reviews = {}
+        total_count = 0
+
+        for sub in submissions:
+            if not hasattr(sub, "details") or not sub.details:
+                continue
+            replies = sub.details.get("replies", [])
+
+            submission_reviews = []
+            for reply in replies:
+                reply_invs = reply.get("invitations", [])
+                if not any("Official_Review" in inv for inv in reply_invs):
+                    continue
+
+                content = reply.get("content", {})
+                anon_id = reply.get("signatures", [""])[0]
+                if not anon_id:
+                    continue
+
+                # Resolve anonymous reviewer ID to profile ID
+                try:
+                    group = client.get_group(anon_id)
+                    reviewer_id = group.members[0] if group.members else anon_id
+                except Exception:
+                    reviewer_id = anon_id
+
+                # Extract structured fields
+                def get_value(field_name):
+                    raw = content.get(field_name, {})
+                    if isinstance(raw, dict):
+                        return raw.get("value")
+                    return raw
+
+                review_data = {
+                    "_reviewer": reviewer_id,
+                    "rating": get_value("rating"),
+                    "confidence": get_value("confidence"),
+                    "ai_generated_content": get_value("ai_generated_content"),
+                    "review_and_resubmit": get_value("review_and_resubmit"),
+                    "best_paper_award": get_value("best_paper_award"),
+                }
+                submission_reviews.append(review_data)
+
+            if submission_reviews:
+                all_reviews[sub.id] = submission_reviews
+                total_count += len(submission_reviews)
+
+        if not dry_run and all_reviews:
+            cache_path = Path(args.cache_dir) / "official_reviews.json"
+            with open(cache_path, "w") as f:
+                json.dump(all_reviews, f, indent=2)
+
+        log.info(
+            f"Cached {total_count} official reviews for {len(all_reviews)} submissions"
+        )
+        return total_count
+
     def _update_assignments(
         self, args: Namespace, client, dry_run: bool
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, int]:
         """
-        Fetch and cache SAC and AC assignments.
-        Returns tuple of (sac_count, ac_count).
+        Fetch and cache SAC, AC, and Reviewer assignments.
+        Returns tuple of (sac_count, ac_count, reviewer_count).
         """
         assignments_cache_dir = Path(args.cache_dir) / "assignments"
 
         assignment_types = [
             ("Senior_Area_Chairs", "senior_area_chairs.json"),
             ("Area_Chairs", "area_chairs.json"),
+            ("Reviewers", "reviewers.json"),
         ]
 
         counts = []
@@ -761,19 +837,25 @@ class UpdateCommand(Command):
         log.info("Updating custom stage responses cache...")
         stage_responses_count = self._update_custom_stages(args, client, args.dry_run)
 
-        # Step 8: Update assignments cache
-        log.info("Updating assignments cache...")
-        sac_assignments, ac_assignments = self._update_assignments(
+        # Step 8: Update official reviews cache
+        log.info("Updating official reviews cache...")
+        official_reviews_count = self._update_official_reviews(
             args, client, args.dry_run
         )
 
-        # Step 9: Fetch desk rejection authors
+        # Step 9: Update assignments cache
+        log.info("Updating assignments cache...")
+        sac_assignments, ac_assignments, reviewer_assignments = self._update_assignments(
+            args, client, args.dry_run
+        )
+
+        # Step 10: Fetch desk rejection authors
         log.info("Fetching desk rejection authors...")
         desk_rejection_authors = self._update_desk_rejection_authors(
             args, client, args.dry_run
         )
 
-        # Step 10: Check for status reversions (withdrawal and desk rejection)
+        # Step 11: Check for status reversions (withdrawal and desk rejection)
         log.info("Checking for status reversions...")
         reversed_withdrawals, reversed_desk_rejections = self._update_status_reversions(
             args, client, args.dry_run
@@ -795,6 +877,8 @@ class UpdateCommand(Command):
         log.info(f"Custom stage responses: {stage_responses_count}")
         log.info(f"SAC assignments: {sac_assignments}")
         log.info(f"AC assignments: {ac_assignments}")
+        log.info(f"Reviewer assignments: {reviewer_assignments}")
+        log.info(f"Official reviews: {official_reviews_count}")
         log.info(f"Desk rejection authors fetched: {desk_rejection_authors}")
         log.info(f"Reversed withdrawals: {reversed_withdrawals}")
         log.info(f"Reversed desk rejections: {reversed_desk_rejections}")

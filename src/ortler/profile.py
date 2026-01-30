@@ -433,6 +433,7 @@ class ProfileWithPapers:
         rdf.add_triple(person_iri, ":position", ":novalue")
         rdf.add_triple(person_iri, ":institution", ":novalue")
         rdf.add_triple(person_iri, ":country", ":novalue")
+        rdf.add_triple(person_iri, ":expertise", ":novalue")
         rdf.add_triple(person_iri, ":num_publications", "0")
         rdf.add_triple(person_iri, ":num_relations", "0")
 
@@ -521,6 +522,18 @@ class ProfileWithPapers:
         rdf.add_triple(
             person_iri, ":country", rdf.literalFromJson(current, "institution.country")
         )
+
+        # Add expertise (comma-separated keywords from all expertise entries)
+        expertise_entries = profile_data.get("content", {}).get("expertise", [])
+        all_keywords = []
+        for entry in expertise_entries:
+            all_keywords.extend(entry.get("keywords", []))
+        if all_keywords:
+            rdf.add_triple(
+                person_iri, ":expertise", rdf.literal(", ".join(all_keywords))
+            )
+        else:
+            rdf.add_triple(person_iri, ":expertise", ":novalue")
 
         # Add publications and collect co-authors
         papers = profile_data.get("publications", [])

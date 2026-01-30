@@ -87,6 +87,16 @@ class DumpCommand(Command):
                 return json.load(f)
         return None
 
+    def _load_official_reviews(self, cache_dir: str) -> dict[str, list[dict]]:
+        """Load official reviews from cache.
+        Returns dict: submission_id -> [review_dict, ...]
+        """
+        cache_path = Path(cache_dir) / "official_reviews.json"
+        if cache_path.exists():
+            with open(cache_path) as f:
+                return json.load(f)
+        return {}
+
     def _load_stage_responses(self, cache_dir: str, stage_name: str) -> dict[str, dict]:
         """Load cached responses for a custom stage.
         Returns dict: author_id -> {field_name: value}
@@ -106,7 +116,7 @@ class DumpCommand(Command):
         assignments_dir = Path(cache_dir) / "assignments"
         all_assignments: dict[str, list[str]] = {}
 
-        for cache_file in ["senior_area_chairs.json", "area_chairs.json"]:
+        for cache_file in ["senior_area_chairs.json", "area_chairs.json", "reviewers.json"]:
             cache_path = assignments_dir / cache_file
             if cache_path.exists():
                 with open(cache_path) as f:
@@ -210,6 +220,8 @@ class DumpCommand(Command):
 
                 rdf.add_triple(person_iri, "a", ":Person")
                 rdf.add_triple(person_iri, ":role", rdf_class)
+                if person_identifiers & invited:
+                    rdf.add_triple(person_iri, ":role_invited", rdf_class)
                 rdf.add_triple(person_iri, ":status", rdf.literal(status))
 
                 # Add reduced_load if present (match by email)
@@ -505,6 +517,36 @@ class DumpCommand(Command):
                 paper_iri = rdf.paperIri(submission_id)
                 for assignee in assignees:
                     rdf.add_triple(paper_iri, ":assigned", rdf.personIri(assignee))
+
+        # Add official review triples
+        official_reviews = self._load_official_reviews(args.cache_dir)
+        if official_reviews:
+            review_count = sum(len(v) for v in official_reviews.values())
+            log.info(f"Adding triples for {review_count} official reviews...")
+            for submission_id, reviews in official_reviews.items():
+                paper_iri = rdf.paperIri(submission_id)
+                for review in reviews:
+                    reviewer_id = review.get("_reviewer", "")
+                    if not reviewer_id:
+                        continue
+                    review_iri = rdf.reviewIri(submission_id, reviewer_id)
+                    rdf.add_triple(paper_iri, ":has_review", review_iri)
+                    rdf.add_triple(review_iri, ":reviewer", rdf.personIri(reviewer_id))
+                    rdf.add_triple(review_iri, "a", ":Review")
+                    rating = review.get("rating")
+                    if rating is not None:
+                        rdf.add_triple(review_iri, ":rating", str(rating))
+                    confidence = review.get("confidence")
+                    if confidence is not None:
+                        rdf.add_triple(review_iri, ":confidence", str(confidence))
+                    for field in [
+                        "ai_generated_content",
+                        "review_and_resubmit",
+                        "best_paper_award",
+                    ]:
+                        value = review.get(field)
+                        if value is not None:
+                            rdf.add_triple(review_iri, f":{field}", rdf.literal(str(value)))
 
         # Add custom stage response triples
         for stage_def in stage_definitions:

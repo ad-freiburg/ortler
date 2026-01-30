@@ -359,71 +359,35 @@ class RecruitmentCommand(Command):
             log.info("Creating it would require appropriate permissions.")
             existing_members = set()
 
-        # Fetch profile information and check for duplicates
-        log.info(f"\n{role_display.capitalize()} to add:")
+        # Check for duplicates
         new_count = 0
         duplicate_count = 0
-        names = []
 
         for user_id in user_ids:
-            # Try to get profile information
-            try:
-                if user_id.startswith("~") or "@" in user_id:
-                    profile = client.get_profile(user_id)
-                    name = (
-                        profile.get_preferred_name()
-                        if hasattr(profile, "get_preferred_name")
-                        else user_id
-                    )
-                else:
-                    name = user_id
-            except Exception:
-                name = user_id
-
-            names.append(name)
-
             if user_id in existing_members:
-                log.info(f"  - {name} ({user_id}) [ALREADY A MEMBER]")
                 duplicate_count += 1
             else:
-                log.info(f"  - {name} ({user_id})")
                 new_count += 1
 
-        log.info("\nSummary:")
-        log.info(f"  New {role_display}: {new_count}")
-        log.info(f"  Already members: {duplicate_count}")
-        log.info(f"  Total: {len(user_ids)}")
+        log.info(
+            f"New: {new_count}, already members: {duplicate_count}, total: {len(user_ids)}"
+        )
 
         if new_count > 0:
-            # Prepare the updated members list
-            new_members = list(existing_members.union(set(user_ids)))
+            new_member_ids = [uid for uid in user_ids if uid not in existing_members]
 
             if args.only_show:
-                log.info(
-                    f"\nTo add these {role_display}, the group would need to be updated with:"
-                )
-                log.info(f"  Group ID: {group_id}")
-                log.info(f"  Total members after addition: {len(new_members)}")
-                log.info(
-                    f"\nNote: This is a preview only. Run without --only-show to actually add {role_display}."
-                )
+                log.info(f"Would add {new_count} to {group_id} (preview only)")
             else:
-                # Actually add the members
-                log.info("\nUpdating group...")
                 try:
-                    # Add only the new members (not duplicates)
-                    new_member_ids = [
-                        uid for uid in user_ids if uid not in existing_members
-                    ]
                     client.add_members_to_group(group_id, new_member_ids)
                     log.info(
                         f"Successfully added {new_count} new {role_display} to {group_id}"
                     )
-                    log.info(f"  Total members now: {len(new_members)}")
                 except Exception as e:
-                    log.error(f" Failed to update group: {e}")
+                    log.error(f"Failed to update group: {e}")
         else:
-            log.info(f"\nNo new {role_display} to add (all are already members).")
+            log.info(f"No new {role_display} to add (all are already members).")
 
     def _remove_specific_members(
         self, args: Namespace, client, from_group: str, user_ids: list[str]
