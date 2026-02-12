@@ -254,6 +254,16 @@ class Rdf:
         dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
         return f'"{dt.strftime("%Y-%m-%dT%H:%M:%SZ")}"^^xsd:dateTime'
 
+    def dateFromTimestamp(self, timestamp_ms: int | None) -> str:
+        """
+        Convert milliseconds timestamp to xsd:date literal.
+        Returns :novalue if timestamp is None or falsy.
+        """
+        if not timestamp_ms:
+            return ":novalue"
+        dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+        return f'"{dt.strftime("%Y-%m-%d")}"^^xsd:date'
+
     def dblpUrlFromBibtex(self, paper: Dict[str, Any]) -> str:
         """
         Extract DBLP URL from a paper's _bibtex field.

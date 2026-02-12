@@ -539,6 +539,22 @@ class DumpCommand(Command):
                     confidence = review.get("confidence")
                     if confidence is not None:
                         rdf.add_triple(review_iri, ":confidence", str(confidence))
+                    tcdate = review.get("tcdate")
+                    if tcdate is not None:
+                        rdf.add_triple(
+                            review_iri, ":cdate", rdf.dateFromTimestamp(tcdate)
+                        )
+                        rdf.add_triple(
+                            review_iri, ":cdatetime", rdf.dateTimeFromTimestamp(tcdate)
+                        )
+                    tmdate = review.get("tmdate")
+                    if tmdate is not None:
+                        rdf.add_triple(
+                            review_iri, ":mdate", rdf.dateFromTimestamp(tmdate)
+                        )
+                        rdf.add_triple(
+                            review_iri, ":mdatetime", rdf.dateTimeFromTimestamp(tmdate)
+                        )
                     for field in [
                         "ai_generated_content",
                         "review_and_resubmit",

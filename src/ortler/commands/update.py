@@ -690,6 +690,8 @@ class UpdateCommand(Command):
                     "ai_generated_content": get_value("ai_generated_content"),
                     "review_and_resubmit": get_value("review_and_resubmit"),
                     "best_paper_award": get_value("best_paper_award"),
+                    "tcdate": reply.get("tcdate"),
+                    "tmdate": reply.get("tmdate"),
                 }
                 submission_reviews.append(review_data)
 
