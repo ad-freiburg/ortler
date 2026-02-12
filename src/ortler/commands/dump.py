@@ -564,9 +564,13 @@ class DumpCommand(Command):
                         if value is not None:
                             rdf.add_triple(review_iri, f":{field}", rdf.literal(str(value)))
 
-        # Add custom stage response triples
+        # Add custom stage response triples (deduplicate by stage name)
+        seen_stages: set[str] = set()
         for stage_def in stage_definitions:
             stage_name = stage_def.get("name", "")
+            if stage_name in seen_stages:
+                continue
+            seen_stages.add(stage_name)
             responses = self._load_stage_responses(args.cache_dir, stage_name)
             if responses:
                 log.info(

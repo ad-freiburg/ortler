@@ -89,12 +89,17 @@ def fetch_stage_responses(
     if is_per_submission_stage(stage_def):
         return _fetch_per_submission_responses(client, venue_id, stage_def)
 
-    # Per-user stage
-    committee = stage_def.get("committee", "Authors")
-    if committee.lower() == "authors":
-        invitation_id = f"{venue_id}/Authors/-/{stage_name}"
-    else:
-        invitation_id = f"{venue_id}/-/{stage_name}"
+    # Per-user stage: invitation is {venue_id}/{CommitteeGroup}/-/{stage_name}
+    committee = stage_def.get("committee", "authors").lower()
+    committee_map = {
+        "authors": "Authors",
+        "reviewers": "Reviewers",
+        "area_chairs": "Area_Chairs",
+        "senior_area_chairs": "Senior_Area_Chairs",
+        "program_chairs": "Program_Chairs",
+    }
+    committee_group = committee_map.get(committee, committee)
+    invitation_id = f"{venue_id}/{committee_group}/-/{stage_name}"
 
     try:
         notes = list(client.get_all_notes(invitation=invitation_id))

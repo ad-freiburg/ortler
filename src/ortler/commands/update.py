@@ -529,19 +529,24 @@ class UpdateCommand(Command):
         total_responses = 0
         tasks_cache_dir = Path(args.cache_dir) / "tasks"
 
+        # Merge responses by stage name (same stage may have multiple
+        # committee definitions, e.g. AC and SAC feedback forms)
+        merged: dict[str, dict] = {}
         for stage_def in stage_definitions:
             stage_name = stage_def.get("name", "")
             responses = fetch_stage_responses(client, args.venue_id, stage_def)
-
             if responses:
-                total_responses += len(responses)
-                if not dry_run:
-                    tasks_cache_dir.mkdir(parents=True, exist_ok=True)
-                    cache_filename = stage_name.lower() + ".json"
-                    cache_path = tasks_cache_dir / cache_filename
-                    with open(cache_path, "w") as f:
-                        json.dump(responses, f, indent=2)
-                log.info(f"Cached {len(responses)} {stage_name} responses")
+                merged.setdefault(stage_name, {}).update(responses)
+
+        for stage_name, responses in merged.items():
+            total_responses += len(responses)
+            if not dry_run:
+                tasks_cache_dir.mkdir(parents=True, exist_ok=True)
+                cache_filename = stage_name.lower() + ".json"
+                cache_path = tasks_cache_dir / cache_filename
+                with open(cache_path, "w") as f:
+                    json.dump(responses, f, indent=2)
+            log.info(f"Cached {len(responses)} {stage_name} responses")
 
         return total_responses
 
