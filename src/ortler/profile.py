@@ -430,6 +430,7 @@ class ProfileWithPapers:
         rdf.add_triple(person_iri, ":orcid", ":novalue")
         rdf.add_triple(person_iri, ":email", ":novalue")
         rdf.add_triple(person_iri, "rdfs:label", ":novalue")
+        rdf.add_triple(person_iri, ":firstname_or_fullname", ":novalue")
         rdf.add_triple(person_iri, ":position", ":novalue")
         rdf.add_triple(person_iri, ":institution", ":novalue")
         rdf.add_triple(person_iri, ":country", ":novalue")
@@ -498,17 +499,32 @@ class ProfileWithPapers:
             rdf.literalFromJson(profile_data, "content.preferredEmail"),
         )
 
-        # Get fullname from the first (preferred) name
+        # Get preferred name entry (or first entry as fallback)
         names = profile_data.get("content", {}).get("names", [])
-        if names and len(names) > 0:
-            fullname = names[0].get("fullname", "")
-            if fullname:
-                fullname_literal = rdf.literal(fullname)
-            else:
-                fullname_literal = ":novalue"
+        preferred_name = next((n for n in names if n.get("preferred")), None)
+        if not preferred_name and names:
+            preferred_name = names[0]
+
+        if preferred_name:
+            fullname = preferred_name.get("fullname", "")
+            fullname_literal = rdf.literal(fullname) if fullname else ":novalue"
         else:
             fullname_literal = ":novalue"
         rdf.add_triple(person_iri, "rdfs:label", fullname_literal)
+
+        # Add first name (if available) or full name as fallback
+        first_name = preferred_name.get("first", "") if preferred_name else ""
+        if first_name:
+            first_or_full = rdf.literal(first_name)
+            rdf.add_triple(person_iri, ":firstname", rdf.literal(first_name))
+        else:
+            first_or_full = fullname_literal
+        rdf.add_triple(person_iri, ":firstname_or_fullname", first_or_full)
+
+        # Add last name (only if available)
+        last_name = preferred_name.get("last", "") if preferred_name else ""
+        if last_name:
+            rdf.add_triple(person_iri, ":lastname", rdf.literal(last_name))
 
         # Add current position and institution from history (first entry)
         history = profile_data.get("content", {}).get("history", [])
