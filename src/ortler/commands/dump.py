@@ -112,6 +112,7 @@ class DumpCommand(Command):
     def _load_assignments(self, cache_dir: str) -> dict[str, list[str]]:
         """Load all assignments from cache.
         Returns dict: submission_id -> [profile_id, ...]
+        Handles both old format (list of strings) and new format (list of dicts).
         """
         assignments_dir = Path(cache_dir) / "assignments"
         all_assignments: dict[str, list[str]] = {}
@@ -124,7 +125,9 @@ class DumpCommand(Command):
                     for submission_id, assignees in data.items():
                         if submission_id not in all_assignments:
                             all_assignments[submission_id] = []
-                        all_assignments[submission_id].extend(assignees)
+                        for a in assignees:
+                            pid = a["profile_id"] if isinstance(a, dict) else a
+                            all_assignments[submission_id].append(pid)
 
         return all_assignments
 

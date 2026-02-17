@@ -455,20 +455,31 @@ class UpdateCommand(Command):
         )
 
     def _update_status_reversions(
-        self, args: Namespace, client, dry_run: bool
+        self, args: Namespace, client, last_update: int, dry_run: bool
     ) -> tuple[int, int]:
         """
         Check for withdrawal and desk rejection reversions.
         A submission is effectively withdrawn/desk-rejected only if the most recent
         action is the withdrawal/rejection, not a reversion.
+        Only checks submissions modified since last_update.
         Returns tuple of (reversed_withdrawals_count, reversed_desk_rejections_count).
         """
         submissions_cache_dir = Path(args.cache_dir) / "submissions"
         if not submissions_cache_dir.exists():
             return 0, 0
 
-        # Find submissions needing reversion checks
-        # Map submission_id -> list of (action_pattern, reversion_pattern, cache_file)
+        # Load previously known reversions
+        prev_reversed: dict[str, set[str]] = {}
+        for _, _, _, cache_fn in self._REVERSION_TYPES:
+            cache_path = submissions_cache_dir / cache_fn
+            if cache_path.exists():
+                with open(cache_path) as f:
+                    prev_reversed[cache_fn] = set(json.load(f))
+            else:
+                prev_reversed[cache_fn] = set()
+
+        # Find submissions needing reversion checks: only those modified since
+        # last update, or not yet in any reversion cache
         submissions_to_check: dict[str, list[tuple[str, str, str]]] = {}
         for cache_file in submissions_cache_dir.glob("*.json"):
             if cache_file.name.startswith("_"):
@@ -478,17 +489,21 @@ class UpdateCommand(Command):
                     submission = json.load(f)
                 invitations = submission.get("invitations", [])
                 sid = submission["id"]
+                tmdate = submission.get("tmdate", 0)
                 for inv_marker, action_pat, rev_pat, cache_fn in self._REVERSION_TYPES:
                     if any(inv_marker in inv for inv in invitations):
+                        # Skip if already known and not modified since last update
+                        if sid in prev_reversed[cache_fn] and tmdate < last_update:
+                            continue
                         submissions_to_check.setdefault(sid, []).append(
                             (action_pat, rev_pat, cache_fn)
                         )
             except Exception:
                 pass
 
-        # Track reversed submissions by cache file
+        # Start with previously known reversions
         reversed_by_file: dict[str, set[str]] = {
-            cfg[3]: set() for cfg in self._REVERSION_TYPES
+            cache_fn: set(ids) for cache_fn, ids in prev_reversed.items()
         }
 
         # Check reversions (fetch forum notes once per submission)
@@ -497,12 +512,15 @@ class UpdateCommand(Command):
                 forum_notes = list(client.get_all_notes(forum=submission_id))
                 for action_pat, rev_pat, cache_fn in checks:
                     if self._check_reversion(forum_notes, action_pat, rev_pat):
+                        if submission_id not in prev_reversed[cache_fn]:
+                            action_name = rev_pat.replace("_Reversion", "").replace(
+                                "_", " "
+                            )
+                            log.info(f"{action_name} reversed: {submission_id}")
                         reversed_by_file[cache_fn].add(submission_id)
-                        # e.g. "Withdrawal_Reversion" -> "Withdrawal reversed"
-                        action_name = rev_pat.replace("_Reversion", "").replace(
-                            "_", " "
-                        )
-                        log.info(f"{action_name} reversed: {submission_id}")
+                    else:
+                        # May have been un-reversed
+                        reversed_by_file[cache_fn].discard(submission_id)
             except Exception as e:
                 log.warning(
                     f"Failed to check status reversions for {submission_id}: {e}"
@@ -637,12 +655,98 @@ class UpdateCommand(Command):
 
         return updated
 
-    def _update_official_reviews(
+    def _update_preferred_emails(
         self, args: Namespace, client, dry_run: bool
     ) -> int:
         """
+        Fetch preferred email edges for the venue and patch cached profiles
+        where the preferredEmail is masked (starts with '****').
+        Returns number of profiles patched.
+        """
+        venue_id = args.venue_id
+        pref_inv = f"{venue_id}/-/Preferred_Emails"
+
+        try:
+            edges = client.get_grouped_edges(
+                invitation=pref_inv, groupby="head", select="tail"
+            )
+        except Exception as e:
+            log.warning(f"Failed to fetch preferred email edges: {e}")
+            return 0
+
+        email_by_id = {}
+        for g in edges:
+            tail = g["values"][0]["tail"]
+            # Skip entries that are profile IDs instead of emails
+            if "@" in tail:
+                email_by_id[g["id"]["head"]] = tail
+
+        log.info(f"Fetched {len(email_by_id)} preferred email edges")
+
+        if dry_run:
+            return 0
+
+        # Patch cached profiles where preferredEmail is masked
+        profiles_dir = Path(args.cache_dir) / "profiles"
+        if not profiles_dir.exists():
+            return 0
+
+        patched = 0
+        for cache_file in profiles_dir.glob("*.json"):
+            if cache_file.name.startswith("_"):
+                continue
+            try:
+                with open(cache_file) as f:
+                    data = json.load(f)
+                pid = data.get("id", "")
+                content = data.get("content", {})
+                current_email = content.get("preferredEmail", "")
+                new_email = email_by_id.get(pid)
+
+                if new_email and (
+                    current_email.startswith("****") or not current_email
+                ):
+                    content["preferredEmail"] = new_email
+                    with open(cache_file, "w") as f:
+                        json.dump(data, f, indent=2)
+                    patched += 1
+            except Exception:
+                pass
+
+        return patched
+
+    def _fetch_anon_groups(
+        self, args: Namespace, client
+    ) -> dict[str, str]:
+        """
+        Bulk-fetch all anonymous groups (Reviewer_, Area_Chair_) in a single
+        API call. Returns dict mapping anon group ID -> profile ID.
+        """
+        anon_to_profile = {}
+        try:
+            all_groups = list(
+                client.get_all_groups(prefix=f"{args.venue_id}/Submission")
+            )
+            for g in all_groups:
+                last = g.id.split("/")[-1]
+                if last.startswith("Reviewer_") or last.startswith("Area_Chair_"):
+                    if g.members:
+                        anon_to_profile[g.id] = g.members[0]
+            log.info(
+                f"Fetched {len(anon_to_profile)} anonymous groups in bulk"
+            )
+        except Exception as e:
+            log.warning(f"Failed to bulk-fetch anonymous groups: {e}")
+        return anon_to_profile
+
+    def _update_official_reviews(
+        self, args: Namespace, client, anon_to_profile: dict[str, str],
+        dry_run: bool,
+    ) -> int:
+        """
         Fetch and cache official reviews for all submissions.
-        Resolves anonymous reviewer IDs to profile IDs.
+        Resolves anonymous reviewer IDs to profile IDs using the
+        bulk-fetched anon_to_profile mapping.
         Returns total number of reviews cached.
         """
         try:
@@ -675,11 +779,7 @@ class UpdateCommand(Command):
                     continue
 
                 # Resolve anonymous reviewer ID to profile ID
-                try:
-                    group = client.get_group(anon_id)
-                    reviewer_id = group.members[0] if group.members else anon_id
-                except Exception:
-                    reviewer_id = anon_id
+                reviewer_id = anon_to_profile.get(anon_id, anon_id)
 
                 # Extract structured fields
                 def get_value(field_name):
@@ -719,22 +819,56 @@ class UpdateCommand(Command):
         return total_count
 
     def _update_assignments(
-        self, args: Namespace, client, dry_run: bool
+        self, args: Namespace, client, anon_to_profile: dict[str, str],
+        dry_run: bool,
     ) -> tuple[int, int, int]:
         """
         Fetch and cache SAC, AC, and Reviewer assignments.
+        Includes anonymous group IDs and readers for ACs and Reviewers,
+        using the bulk-fetched anon_to_profile mapping.
         Returns tuple of (sac_count, ac_count, reviewer_count).
         """
         assignments_cache_dir = Path(args.cache_dir) / "assignments"
 
+        # Build submission_id -> number mapping from cache
+        id_to_number = {}
+        submissions_dir = Path(args.cache_dir) / "submissions"
+        if submissions_dir.exists():
+            for cache_file in submissions_dir.glob("*.json"):
+                if cache_file.name.startswith("_"):
+                    continue
+                try:
+                    with open(cache_file) as f:
+                        sub = json.load(f)
+                    sid = sub.get("id")
+                    num = sub.get("number")
+                    if sid and num:
+                        id_to_number[sid] = num
+                except Exception:
+                    pass
+
+        # Build per-submission anon lookup from bulk data:
+        # (submission_number, anon_prefix) -> {profile_id -> {anon_id, readers}}
+        # We only need the anon_id (last part of group ID), not the full group.
+        # The bulk data doesn't include readers, so we skip that.
+        anon_by_submission: dict[str, dict[str, str]] = {}
+        for group_id, profile_id in anon_to_profile.items():
+            # e.g. ".../Submission123/Reviewer_ABC" -> ("123", "Reviewer_ABC")
+            parts = group_id.split("/")
+            anon_id = parts[-1]  # e.g. "Reviewer_ABC"
+            sub_part = parts[-2]  # e.g. "Submission123"
+            key = f"{sub_part}/{anon_id.split('_')[0]}_"  # e.g. "Submission123/Reviewer_"
+            anon_by_submission.setdefault(key, {})[profile_id] = anon_id
+
+        # (role, cache_file, anonymous_group_prefix or None)
         assignment_types = [
-            ("Senior_Area_Chairs", "senior_area_chairs.json"),
-            ("Area_Chairs", "area_chairs.json"),
-            ("Reviewers", "reviewers.json"),
+            ("Senior_Area_Chairs", "senior_area_chairs.json", None),
+            ("Area_Chairs", "area_chairs.json", "Area_Chair_"),
+            ("Reviewers", "reviewers.json", "Reviewer_"),
         ]
 
         counts = []
-        for role, cache_filename in assignment_types:
+        for role, cache_filename, anon_prefix in assignment_types:
             try:
                 edges = client.get_grouped_edges(
                     invitation=f"{args.venue_id}/{role}/-/Assignment",
@@ -745,12 +879,22 @@ class UpdateCommand(Command):
                 counts.append(0)
                 continue
 
-            # Convert to {submission_id: [profile_id, ...]}
             assignments = {}
             for group in edges:
                 submission_id = group["id"]["head"]
                 assignees = [v["tail"] for v in group["values"]]
-                assignments[submission_id] = assignees
+                number = id_to_number.get(submission_id)
+
+                assignment_list = []
+                for pid in assignees:
+                    entry = {"profile_id": pid}
+                    if anon_prefix and number:
+                        key = f"Submission{number}/{anon_prefix}"
+                        anon_id = anon_by_submission.get(key, {}).get(pid)
+                        if anon_id:
+                            entry["anon_id"] = anon_id
+                    assignment_list.append(entry)
+                assignments[submission_id] = assignment_list
 
             counts.append(len(assignments))
 
@@ -836,40 +980,48 @@ class UpdateCommand(Command):
             recache_publications,
         )
 
-        # Step 5: Update group membership cache
+        # Step 5: Patch masked emails with preferred email edges
+        log.info("Updating preferred emails...")
+        patched_emails = self._update_preferred_emails(args, client, args.dry_run)
+
+        # Step 6: Update group membership cache
         log.info("Updating group membership cache...")
         changed_groups = self._update_groups(args, client, last_update, args.dry_run)
 
-        # Step 6: Update reduced loads cache
+        # Step 7: Update reduced loads cache
         log.info("Updating reduced loads cache...")
         self._update_reduced_loads(args, client, args.dry_run)
 
-        # Step 7: Update custom stage responses cache
+        # Step 8: Update custom stage responses cache
         log.info("Updating custom stage responses cache...")
         stage_responses_count = self._update_custom_stages(args, client, args.dry_run)
 
-        # Step 8: Update official reviews cache
+        # Step 9: Bulk-fetch anonymous groups (used by reviews and assignments)
+        log.info("Fetching anonymous groups...")
+        anon_to_profile = self._fetch_anon_groups(args, client)
+
+        # Step 10: Update official reviews cache
         log.info("Updating official reviews cache...")
         official_reviews_count = self._update_official_reviews(
-            args, client, args.dry_run
+            args, client, anon_to_profile, args.dry_run
         )
 
-        # Step 9: Update assignments cache
+        # Step 11: Update assignments cache
         log.info("Updating assignments cache...")
         sac_assignments, ac_assignments, reviewer_assignments = self._update_assignments(
-            args, client, args.dry_run
+            args, client, anon_to_profile, args.dry_run
         )
 
-        # Step 10: Fetch desk rejection authors
+        # Step 12: Fetch desk rejection authors
         log.info("Fetching desk rejection authors...")
         desk_rejection_authors = self._update_desk_rejection_authors(
             args, client, args.dry_run
         )
 
-        # Step 11: Check for status reversions (withdrawal and desk rejection)
+        # Step 13: Check for status reversions (withdrawal and desk rejection)
         log.info("Checking for status reversions...")
         reversed_withdrawals, reversed_desk_rejections = self._update_status_reversions(
-            args, client, args.dry_run
+            args, client, last_update, args.dry_run
         )
 
         # Save new timestamp (unless dry run)
@@ -884,6 +1036,7 @@ class UpdateCommand(Command):
         log.info(f"Modified submissions: {modified_subs}")
         log.info(f"Profiles with new publications: {len(profiles_with_new_pubs)}")
         log.info(f"Profiles updated: {updated_profiles}")
+        log.info(f"Emails patched from preferred edges: {patched_emails}")
         log.info(f"Groups with membership changes: {len(changed_groups)}")
         log.info(f"Custom stage responses: {stage_responses_count}")
         log.info(f"SAC assignments: {sac_assignments}")
