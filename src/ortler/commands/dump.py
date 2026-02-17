@@ -556,6 +556,10 @@ class DumpCommand(Command):
                             review_iri, ":mdatetime", rdf.dateTimeFromTimestamp(tmdate)
                         )
                     for field in [
+                        "strengths",
+                        "weaknesses",
+                        "detailed_comments",
+                        "responsible_reviewing",
                         "ai_generated_content",
                         "review_and_resubmit",
                         "best_paper_award",
