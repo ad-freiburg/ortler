@@ -14,9 +14,11 @@
 - `src/ortler/commands/`: Individual command implementations
   - `update.py`: Incremental cache sync with OpenReview
   - `dump.py`: Output all cached data as RDF
+  - `review_stage.py`: Deploy review stage configuration
   - `recruitment.py`: Manage PC/SPC/AC membership
   - `submissions.py`: Show cached submission summary
   - `mail.py`: Send emails via OpenReview API
+- `stages/review-stage.json`: Review stage configuration file
 
 ## OpenReview APIs
 OpenReview has TWO APIs that must both be queried to get complete data:
@@ -47,8 +49,10 @@ QLEVER_QUERY_API_PASSWORD=password
 - `as_turtle()` outputs proper Turtle format with semicolons/commas
 - Prefixes: `paper:` for papers/submissions, `person:` for profiles
 - `paperIri()` handles IDs starting with `-` by using full IRI form
-- Person triples: `:id`, `:state`, `:role`, `:status`, `:gender`, `:dblp_id`, `:orcid`, `:email`, `:position`, `:institution`, `:publication`, `:dblp_publication`, `:num_publications`
-- Submission triples: `:status` (active/deleted/withdrawn/desk_rejected), `:title`, `:abstract`, `:author`, `:authors`, `:num_authors`, `:has_pdf`, `:created_on`, `:last_modified_on`, AI review fields
+- Person triples: `:id`, `:state`, `:role`, `:status`, `:gender`, `:dblp_id`, `:orcid`, `:email`, `:position`, `:institution`, `:publication`, `:dblp_publication`, `:num_publications`, `:firstname`, `:familyname`, `:firstname_or_fullname`
+- Submission triples: `:status` (active/deleted/withdrawn/desk_rejected), `:title`, `:abstract`, `:author`, `:authors`, `:num_authors`, `:has_pdf`, `:created_on`, `:last_modified_on`, `:assigned`, `:has_review`, AI review fields
+- Review triples: `:reviewer`, `:rating`, `:confidence`, `:strengths`, `:weaknesses`, `:detailed_comments`, `:responsible_reviewing`, `:ai_generated_content`, `:review_and_resubmit`, `:best_paper_award`, `:cdate`, `:cdatetime`, `:mdate`, `:mdatetime`
+- Date helpers: `dateFromTimestamp()` returns `xsd:date`, `dateTimeFromTimestamp()` returns `xsd:dateTime`
 
 ## Mail Command
 - Sends emails via OpenReview API from a file with headers and body
@@ -76,6 +80,10 @@ The cache directory (set via `CACHE_DIR` or `--cache-dir`) contains:
 - `submissions/`: Submission JSON files
 - `groups/`: Group membership (Reviewers.json, Area_Chairs.json, etc.)
 - `recruitment/reduced_loads.json`: Reduced load entries
+- `official_reviews.json`: Official reviews keyed by submission ID
+- `assignments/`: Assignment JSON files per submission
+- `submissions/_reversed_desk_rejections.json`: Submission IDs with reversed desk rejections
+- `submissions/_reversed_withdrawals.json`: Submission IDs with reversed withdrawals
 - `reviews/`: AI review JSON files
 - `pdfs/`: Downloaded submission PDFs
 
@@ -135,3 +143,55 @@ Roles: `pc` (Reviewers), `spc` (Area Chairs), `ac` (Senior Area Chairs)
 
 ## Rate Limiting
 OpenReview API has rate limits (3 requests per time window). Use cache-based workflow to minimize API calls. If rate limited, wait ~30 seconds.
+
+## Preferred Email Edges
+OpenReview masks email addresses in profiles. To get actual emails, use preferred email edges:
+```python
+edges = client.get_grouped_edges(
+    invitation=f"{venue_id}/-/Preferred_Emails",
+    groupby="head", select="tail"
+)
+```
+This is a single API call returning all email edges for the venue. The `update` command fetches these and patches cached profiles where `preferredEmail` starts with `****`.
+
+## Bulk Anonymous Group Fetching
+Instead of per-submission API calls to resolve anonymous reviewer IDs, use:
+```python
+all_groups = list(client.get_all_groups(prefix=f"{venue_id}/Submission"))
+```
+This returns all ~15000 groups in ~1 second. Used by both `_update_official_reviews` and `_update_assignments` to resolve `Reviewer_XXXX` → profile ID mappings.
+
+## OpenReview Note/Group Editing via API
+- **Edit note readers** (e.g., desk rejection reversion visibility):
+  ```python
+  client.post_note_edit(
+      invitation=f"{venue_id}/-/Edit",
+      signatures=[f"{venue_id}/Program_Chairs"],
+      note=openreview.api.Note(id=note_id, readers=new_readers)
+  )
+  ```
+- **Edit group readers** (e.g., anonymous reviewer group visibility):
+  ```python
+  client.post_group_edit(
+      invitation=f"{venue_id}/-/Edit",
+      signatures=[venue_id],
+      group=openreview.api.Group(id=group_id, readers=new_readers)
+  )
+  ```
+- Note: API v2 has no `post_group()` method; use `post_group_edit()` instead.
+
+## Anonymous Reviewer Groups
+Each reviewer assignment creates a group like `Submission{N}/Reviewer_XXXX` with the reviewer's profile ID as member. The `readers` field controls who can see the reviewer's identity:
+- Correct: `[Conference, Program_Chairs, Reviewer_self, Senior_Area_Chairs, Area_Chairs]`
+- If SAC/AC are missing from readers, ACs cannot see reviewer names/emails (greyed out "Copy Email", anonymized names)
+- Stale groups (reviewer unassigned but group remains) can exist — check against `Submission{N}/Reviewers` group members
+
+## Review Stage Configuration
+- `ortler review-stage stages/review-stage.json` deploys the review stage config
+- Key setting: `email_program_chairs` controls whether PC chairs get emails for each new review
+- The live config can be checked via `client.get_invitation(f"{venue_id}/Submission{N}/-/Official_Review")`
+
+## Known Issues
+- **Stale profile ID mappings**: When OpenReview merges/renames profiles, `_id_mapping.json` can have stale entries (e.g., `~Zeyu_Song5 → ~Sen_Wu3` when canonical is now `~Zeyu_Song5`). Requires `--recache profiles` to fix. No way to update a single profile currently.
+- **Desk rejection reversion visibility**: OpenReview sets `Desk_Rejection_Reversion` note readers to only `[Program_Chairs, Authors]`, unlike `Desk_Rejection` which includes all roles. The parent invitation template has been fixed, but existing per-submission invitations retain old readers. Can be fixed per-note via `post_note_edit`.
+- **Withdrawal reversions** have correct visibility (all roles) — only desk rejection reversions had this issue.
