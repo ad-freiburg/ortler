@@ -71,15 +71,15 @@ def _convert_email_profile_to_email(profile_id: str) -> str:
     return f"{local_part}@{domain}"
 
 
-def query_results_by_recipient(hash_or_url: str) -> tuple[list[str], dict[str, dict]]:
+def query_results_by_recipient(hash_or_url: str) -> tuple[list[str], list[dict]]:
     """
-    Execute a SPARQL query and return results keyed by recipient.
+    Execute a SPARQL query and return results per row.
 
     Returns:
-        (recipients, data_by_recipient) where:
-        - recipients: list of profile IDs/emails (from first column with profile IRIs)
-        - data_by_recipient: dict mapping each recipient to {variable: value, ...}
-          for all other variables in that row
+        (recipients, data_per_row) where:
+        - recipients: list of profile IDs/emails (from first column with profile IRIs),
+          one per query result row (may contain duplicates if a recipient has multiple rows)
+        - data_per_row: list of {variable: value, ...} dicts, parallel to recipients
     """
     query = get_sparql_query(hash_or_url)
     result = issue_sparql_query(query)
@@ -111,9 +111,9 @@ def query_results_by_recipient(hash_or_url: str) -> tuple[list[str], dict[str, d
     if not recipient_var:
         raise ValueError("No column found with profile IRIs")
 
-    # Build recipients list and data mapping
+    # Build recipients list and per-row data (parallel lists)
     recipients = []
-    data_by_recipient: dict[str, dict] = {}
+    data_per_row: list[dict] = []
 
     for row in bindings:
         # Extract recipient ID
@@ -126,9 +126,9 @@ def query_results_by_recipient(hash_or_url: str) -> tuple[list[str], dict[str, d
         row_data = {}
         for var in variables:
             row_data[var] = row.get(var, {}).get("value", "")
-        data_by_recipient[recipient] = row_data
+        data_per_row.append(row_data)
 
-    return recipients, data_by_recipient
+    return recipients, data_per_row
 
 
 def recipients_from_query(hash_or_url: str) -> list[str]:

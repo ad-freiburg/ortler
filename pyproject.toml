@@ -1,6 +1,6 @@
 [project]
 name = "ortler"
-version = "0.2.16"
+version = "0.2.18"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -10,6 +10,9 @@ dependencies = [
     "openai",
     "pdf2image",
     "reportlab",
+    "pangram-sdk",
+    "pypdf",
+    "pyoxigraph",
     "python-dotenv",
     "termcolor",
 ]

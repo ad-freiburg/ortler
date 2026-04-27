@@ -61,6 +61,12 @@ class MailCommand(Command):
             metavar="N",
             help="Randomly select N recipients (useful for testing)",
         )
+        parser.add_argument(
+            "--write-to-file",
+            metavar="PATH_TEMPLATE",
+            help="Write personalized body to files instead of sending email; "
+            "path may use {{variable}} templates from the SPARQL query",
+        )
 
     def _get_name(self, profile) -> str:
         """
@@ -99,7 +105,7 @@ class MailCommand(Command):
         body: str,
         placeholders: set[str],
         recipient: str,
-        query_data_by_recipient: dict[str, dict],
+        row_data: dict | None,
         client,
     ) -> str:
         """
@@ -120,8 +126,7 @@ class MailCommand(Command):
             )
 
         # Substitute query variables if available
-        if recipient in query_data_by_recipient:
-            row_data = query_data_by_recipient[recipient]
+        if row_data:
             for var, value in row_data.items():
                 personalized_body = personalized_body.replace(
                     "{{" + var + "}}", value if value else ""
@@ -135,7 +140,7 @@ class MailCommand(Command):
         headers: dict,
         body: str,
         placeholders: set[str],
-        query_data_by_recipient: dict[str, dict],
+        data_per_row: list[dict],
         client,
     ) -> str:
         """
@@ -145,11 +150,12 @@ class MailCommand(Command):
         timestamp = datetime.now().strftime("%a %b %d %H:%M:%S %Y")
         from_email = self._parse_from_header(headers["From"])["fromEmail"]
 
-        for recipient in recipients:
+        for i, recipient in enumerate(recipients):
             # Personalize body if needed
             if placeholders:
+                row_data = data_per_row[i] if i < len(data_per_row) else None
                 email_body = self._personalize_body(
-                    body, placeholders, recipient, query_data_by_recipient, client
+                    body, placeholders, recipient, row_data, client
                 )
             else:
                 email_body = body
@@ -190,7 +196,7 @@ class MailCommand(Command):
         query_hash_or_url = args.recipients_from_sparql_query or query_from_file
 
         # Replace To: recipients from SPARQL query if requested
-        query_data_by_recipient: dict[str, dict] = {}
+        data_per_row: list[dict] = []
         if query_hash_or_url:
             if query_from_file and not args.recipients_from_sparql_query:
                 log.info(f"Using query from file: {query_from_file}")
@@ -201,7 +207,7 @@ class MailCommand(Command):
                     "when using a SPARQL query for recipients"
                 )
                 return
-            query_recipients, query_data_by_recipient = query_results_by_recipient(
+            query_recipients, data_per_row = query_results_by_recipient(
                 query_hash_or_url
             )
             new_to_line = "To: " + ", ".join(query_recipients)
@@ -220,6 +226,48 @@ class MailCommand(Command):
 
         # Clean up body: remove trailing empty lines
         body = body.rstrip()
+
+        # Write-to-file mode: write personalized files instead of sending email
+        if args.write_to_file:
+            if not query_hash_or_url:
+                log.error(
+                    "--write-to-file requires a SPARQL query "
+                    "(use --recipients-from-sparql-query or # Query: in the file)"
+                )
+                return
+
+            placeholder_pattern = re.compile(r"\{\{(\w+)\}\}")
+            placeholders = set(placeholder_pattern.findall(body))
+            path_placeholders = set(placeholder_pattern.findall(args.write_to_file))
+            all_placeholders = placeholders | path_placeholders
+
+            written = 0
+            for i, recipient in enumerate(query_recipients):
+                row_data = data_per_row[i] if i < len(data_per_row) else {}
+                # Resolve body templates
+                personalized_body = self._personalize_body(
+                    body,
+                    all_placeholders,
+                    recipient,
+                    row_data,
+                    client,
+                )
+
+                # Resolve filename templates
+                file_path = args.write_to_file
+                for var, value in row_data.items():
+                    file_path = file_path.replace(
+                        "{{" + var + "}}", value if value else ""
+                    )
+
+                output_path = Path(file_path)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(output_path, "w") as f:
+                    f.write(personalized_body)
+                written += 1
+
+            log.info(f"Wrote {written} files")
+            return
 
         # Parse headers
         headers = {}
@@ -262,7 +310,9 @@ class MailCommand(Command):
         # Apply random sampling if specified
         sampled = False
         if args.random_sample and args.random_sample < len(original_recipients):
-            original_recipients = random.sample(original_recipients, args.random_sample)
+            indices = random.sample(range(len(original_recipients)), args.random_sample)
+            original_recipients = [original_recipients[i] for i in indices]
+            data_per_row = [data_per_row[i] for i in indices] if data_per_row else []
             sampled = True
 
         # Write updated content back to file (with sampled recipients if applicable)
@@ -334,7 +384,7 @@ class MailCommand(Command):
             headers,
             body,
             placeholders,
-            query_data_by_recipient,
+            data_per_row,
             client,
         )
         mail_path = Path(args.file)
@@ -353,8 +403,9 @@ class MailCommand(Command):
             log.warning("\nAborted")
             return
 
-        # Build invitation ID for messaging
+        # Build invitation ID and signature for messaging
         invitation = f"{args.venue_id}/-/Edit"
+        signature = f"{args.venue_id}/Program_Chairs"
 
         # Send the email(s) to To recipients
         sent_count = 0
@@ -364,12 +415,13 @@ class MailCommand(Command):
             # Use original_recipients for data lookup, recipients for actual sending
             for i, original_recipient in enumerate(original_recipients):
                 send_to = recipients[i]
+                row_data = data_per_row[i] if i < len(data_per_row) else None
 
                 personalized_body = self._personalize_body(
                     body,
                     placeholders,
                     original_recipient,
-                    query_data_by_recipient,
+                    row_data,
                     client,
                 )
 
@@ -379,6 +431,7 @@ class MailCommand(Command):
                         recipients=[send_to],
                         message=personalized_body + self.separator,
                         invitation=invitation,
+                        signature=signature,
                         sender=sender,
                         replyTo=reply_to,
                     )
@@ -394,6 +447,7 @@ class MailCommand(Command):
                     recipients=recipients,
                     message=body + self.separator,
                     invitation=invitation,
+                    signature=signature,
                     sender=sender,
                     replyTo=reply_to,
                 )
@@ -445,6 +499,7 @@ class MailCommand(Command):
                     recipients=cc_recipients,
                     message=fyi_body,
                     invitation=invitation,
+                    signature=signature,
                     sender=sender,
                 )
                 log.info(f"FYI sent to Cc: {headers.get('Cc')}")
