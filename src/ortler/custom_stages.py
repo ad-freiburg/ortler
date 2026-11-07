@@ -195,11 +195,14 @@ def _add_per_user_triples(
 
         for field_name, value in response.items():
             predicate = f":task_{field_name}"
-            rdf.add_triple(
-                person_iri,
-                predicate,
-                rdf.literal(value) if value else ":novalue",
-            )
+            if isinstance(value, (int, float)):
+                rdf.add_triple(person_iri, predicate, str(value))
+            else:
+                rdf.add_triple(
+                    person_iri,
+                    predicate,
+                    rdf.literal(value) if value else ":novalue",
+                )
 
 
 def _add_per_submission_triples(
@@ -218,11 +221,14 @@ def _add_per_submission_triples(
                 rdf.add_triple(paper_iri, predicate, rdf.personIri(value))
             else:
                 predicate = f":task_{stage_name}_{field_name}"
-                rdf.add_triple(
-                    paper_iri,
-                    predicate,
-                    rdf.literal(value) if value else ":novalue",
-                )
+                if isinstance(value, (int, float)):
+                    rdf.add_triple(paper_iri, predicate, str(value))
+                else:
+                    rdf.add_triple(
+                        paper_iri,
+                        predicate,
+                        rdf.literal(value) if value else ":novalue",
+                    )
 
 
 def get_all_stage_definitions(
