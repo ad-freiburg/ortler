@@ -70,7 +70,7 @@ def _extract_response_fields(
         if field_name in enum_mapping and raw_value in enum_mapping[field_name]:
             response[field_name] = enum_mapping[field_name][raw_value]
         else:
-            response[field_name] = raw_value or ""
+            response[field_name] = raw_value if raw_value is not None else ""
 
     return response
 
@@ -186,6 +186,19 @@ def add_stage_triples(
         _add_per_user_triples(rdf, stage_def, responses)
 
 
+def _answer_object(rdf: Rdf, value: Any) -> str:
+    """
+    Return the Turtle object for a stage answer: `true` or `false` for a
+    boolean, a plain numeric literal for a number, a string literal for a
+    non-empty string, and `:novalue` for an empty answer.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return rdf.literal(value) if value else ":novalue"
+
+
 def _add_per_user_triples(
     rdf: Rdf, stage_def: dict[str, Any], responses: dict[str, dict[str, str]]
 ) -> None:
@@ -195,14 +208,7 @@ def _add_per_user_triples(
 
         for field_name, value in response.items():
             predicate = f":task_{field_name}"
-            if isinstance(value, (int, float)):
-                rdf.add_triple(person_iri, predicate, str(value))
-            else:
-                rdf.add_triple(
-                    person_iri,
-                    predicate,
-                    rdf.literal(value) if value else ":novalue",
-                )
+            rdf.add_triple(person_iri, predicate, _answer_object(rdf, value))
 
 
 def _add_per_submission_triples(
@@ -221,14 +227,7 @@ def _add_per_submission_triples(
                 rdf.add_triple(paper_iri, predicate, rdf.personIri(value))
             else:
                 predicate = f":task_{stage_name}_{field_name}"
-                if isinstance(value, (int, float)):
-                    rdf.add_triple(paper_iri, predicate, str(value))
-                else:
-                    rdf.add_triple(
-                        paper_iri,
-                        predicate,
-                        rdf.literal(value) if value else ":novalue",
-                    )
+                rdf.add_triple(paper_iri, predicate, _answer_object(rdf, value))
 
 
 def get_all_stage_definitions(
